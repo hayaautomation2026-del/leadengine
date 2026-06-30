@@ -1,0 +1,42 @@
+name: Weekly Broker Lead Scraper
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # Every Monday at 3AM UTC (8AM PKT)
+  workflow_dispatch:      # Manual trigger from phone browser anytime
+
+concurrency:
+  group: scraper
+  cancel-in-progress: true  # Kills old run if new one starts — no duplicates
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30   # Kill if hangs — protects free tier minutes
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests supabase==2.3.4
+
+      - name: Run scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}  # Service key for RLS bypass on writes
+          OUTSCRAPER_API_KEY: ${{ secrets.OUTSCRAPER_API_KEY }}
+        run: python scraper.py
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-logs
+          path: "*.log"
+          retention-days: 7
