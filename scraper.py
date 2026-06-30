@@ -217,11 +217,11 @@ def check_website(url):
 # ============================================================
 # OUTSCRAPER API CALL
 # ============================================================
-def fetch_from_outscraper(query, location, limit=20):
+def fetch_from_serpapi(query, location, limit=20):
     """
-    Calls Outscraper Google Maps API.
-    Returns list of raw place dicts.
-    Free tier: 25 searches/month with 20 results each = 500 leads.
+    Calls SerpApi Google Maps search.
+    Free tier: 100 searches/month — no credit card needed.
+    Sign up free at serpapi.com
     Retries up to MAX_RETRIES times with exponential backoff.
     """
     print(f"\n  Fetching: '{query}' in '{location}'")
@@ -229,33 +229,40 @@ def fetch_from_outscraper(query, location, limit=20):
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             response = requests.get(
-                "https://api.app.outscraper.com/maps/search-v3",
-                headers={"X-API-KEY": OUTSCRAPER_API_KEY},
+                "https://serpapi.com/search",
                 params={
-                    "query": f"{query} {location}",
-                    "limit": limit,
-                    "language": "en",
-                    "fields": "name,phone,site,full_address,city,country,place_id,url,type,subtypes"
+                    "engine": "google_maps",
+                    "q": f"{query} {location}",
+                    "type": "search",
+                    "api_key": OUTSCRAPER_API_KEY,
+                    "hl": "en",
                 },
                 timeout=30
             )
 
             if response.status_code == 200:
                 data = response.json()
-                results = data.get("data", [])
-                if results and isinstance(results[0], list):
-                    results = results[0]
+                results = data.get("local_results", [])
                 print(f"  Got {len(results)} results")
 
-                # Zero results = FAILED not success
                 if len(results) == 0:
                     raise RuntimeError(f"API returned 0 results for '{query}' in '{location}' — marking run FAILED")
 
-                # Anomaly detection — warn if suspiciously low
                 if len(results) < 5 and limit >= 10:
-                    print(f"  WARNING: Low result count ({len(results)}) — possible rate limit or API drift")
+                    print(f"  WARNING: Low result count ({len(results)}) — possible rate limit")
 
-                return results
+                normalized = []
+                for r in results:
+                    normalized.append({
+                        "name": r.get("title", ""),
+                        "phone": r.get("phone", ""),
+                        "site": r.get("website", ""),
+                        "url": r.get("place_id_search", ""),
+                        "city": location.split(",")[0].strip(),
+                        "full_address": r.get("address", ""),
+                        "country": location,
+                    })
+                return normalized
 
             elif response.status_code == 429:
                 wait = RETRY_BACKOFF_BASE ** attempt
@@ -263,27 +270,26 @@ def fetch_from_outscraper(query, location, limit=20):
                 time.sleep(wait)
 
             else:
-                msg = f"API FAILED: Outscraper returned {response.status_code}: {response.text[:200]}"
+                msg = f"API FAILED: SerpApi returned {response.status_code}: {response.text[:200]}"
                 print(f"  {msg}")
-                raise RuntimeError(msg)  # Hard stop — not silent
+                raise RuntimeError(msg)
 
         except requests.exceptions.Timeout:
             wait = RETRY_BACKOFF_BASE ** attempt
             print(f"  TIMEOUT on attempt {attempt}/{MAX_RETRIES}. Retrying in {wait}s")
             time.sleep(wait)
 
+        except RuntimeError:
+            raise
+
         except Exception as e:
-            print(f"  ERROR: Outscraper request failed (attempt {attempt}/{MAX_RETRIES}): {e}")
+            print(f"  ERROR: SerpApi request failed (attempt {attempt}/{MAX_RETRIES}): {e}")
             if attempt == MAX_RETRIES:
-                return []
+                raise RuntimeError(f"All retries exhausted: {e}")
             time.sleep(RETRY_BACKOFF_BASE ** attempt)
 
-    print(f"  FAILED: All {MAX_RETRIES} retries exhausted for '{query}' in '{location}'")
-    return []
+    raise RuntimeError(f"All {MAX_RETRIES} retries exhausted for '{query}' in '{location}'")
 
-# ============================================================
-# SUPABASE UPSERT
-# ============================================================
 def upsert_lead(supabase: Client, lead: dict):
     """
     Inserts or updates lead by phone number.
@@ -441,7 +447,7 @@ def main():
                 print(f"\n  HARD CAP REACHED ({HARD_CAP_LEADS}). Stopping.")
                 break
 
-            raw_results = fetch_from_outscraper(
+            raw_results = fetch_from_serpapi(
                 query=target["query"],
                 location=target["location"],
                 limit=MAX_RESULTS_PER_QUERY
