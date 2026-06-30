@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LeadEngine">
+<meta name="theme-color" content="#0a0a0f">
+<title>LeadEngine</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg:        #0a0a0f;
+    --surface:   #13131a;
+    --border:    #1e1e2e;
+    --accent:    #00e5a0;
+    --accent2:   #ff6b35;
+    --text:      #e8e8f0;
+    --muted:     #6b6b80;
+    --hot:       #ff4d6d;
+    --warm:      #ffa500;
+    --cold:      #4a4a5a;
+    --converted: #00e5a0;
+    --radius:    12px;
+    --font:      -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    min-height: 100vh;
+    padding-bottom: 80px;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 20px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header-title {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--accent);
+  }
+  .header-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .sync-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .sync-btn:active { opacity: 0.7; transform: scale(0.97); }
+  .sync-btn.loading { opacity: 0.5; pointer-events: none; }
+
+  /* ── SETUP SCREEN ── */
+  .setup-screen {
+    padding: 40px 20px;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  .setup-screen h2 {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--accent);
+  }
+  .setup-screen p {
+    color: var(--muted);
+    font-size: 14px;
+    margin-bottom: 28px;
+    line-height: 1.5;
+  }
+  .field-group { margin-bottom: 16px; }
+  .field-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .field-input {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-family: 'SF Mono', monospace;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .field-input:focus { border-color: var(--accent); }
+  .connect-btn {
+    width: 100%;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    padding: 14px;
+    border-radius: var(--radius);
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: opacity 0.2s;
+  }
+  .connect-btn:active { opacity: 0.8; }
+
+  /* ── STATS BAR ── */
+  .stats-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    padding: 16px 16px 0;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 8px;
+    text-align: center;
+  }
+  .stat-num {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .stat-num.hot   { color: var(--hot); }
+  .stat-num.warm  { color: var(--warm); }
+  .stat-num.done  { color: var(--converted); }
+  .stat-num.total { color: var(--text); }
+  .stat-label {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  /* ── TABS ── */
+  .tabs {
+    display: flex;
+    gap: 6px;
+    padding: 16px 16px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+  .tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+  }
+
+  /* ── LEAD LIST ── */
+  .lead-list {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .lead-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .lead-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--cold);
+  }
+  .lead-card.score-high::before  { background: var(--hot); }
+  .lead-card.score-mid::before   { background: var(--warm); }
+  .lead-card.converted::before   { background: var(--converted); }
+  .lead-card:active { border-color: var(--accent); }
+
+  .lead-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .lead-name {
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.2;
+    flex: 1;
+    padding-right: 8px;
+  }
+  .score-badge {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-weight: 800;
+    flex-shrink: 0;
+  }
+  .score-badge.high { color: var(--hot); border-color: var(--hot); }
+  .score-badge.mid  { color: var(--warm); border-color: var(--warm); }
+  .score-badge.low  { color: var(--muted); }
+
+  .lead-meta {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .meta-chip {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .meta-chip.country-uae { color: #4db8ff; border-color: #4db8ff33; }
+  .meta-chip.country-usa { color: #ff9f4a; border-color: #ff9f4a33; }
+
+  .lead-reason {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.4;
+    margin-bottom: 10px;
+  }
+
+  .lead-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .action-btn {
+    flex: 1;
+    padding: 9px 8px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    text-align: center;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+  .action-btn:active { opacity: 0.7; }
+  .btn-wa {
+    background: #25d366;
+    color: #fff;
+  }
+  .btn-status {
+    background: var(--bg);
+    border: 1px solid var(--border) !important;
+    color: var(--text);
+    border: none;
+  }
+  .btn-notes {
+    background: var(--bg);
+    border: 1px solid var(--border) !important;
+    color: var(--muted);
+    border: none;
+    flex: 0.6;
+  }
+
+  /* ── STATUS MODAL ── */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 200;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px 20px 0 0;
+    padding: 20px;
+    width: 100%;
+    max-width: 540px;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  .modal-handle {
+    width: 36px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 0 auto 16px;
+  }
+  .modal-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+  .status-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .status-option {
+    padding: 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    cursor: pointer;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+  .status-option:active { opacity: 0.7; }
+  .status-option.new       { color: var(--text); }
+  .status-option.contacted { color: var(--warm); border-color: var(--warm); }
+  .status-option.qualified { color: #4db8ff; border-color: #4db8ff; }
+  .status-option.converted { color: var(--converted); border-color: var(--converted); }
+  .status-option.cold      { color: var(--muted); }
+
+  .notes-area {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 12px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-family: var(--font);
+    resize: none;
+    outline: none;
+    min-height: 80px;
+    margin-bottom: 12px;
+  }
+  .notes-area:focus { border-color: var(--accent); }
+
+  .save-btn {
+    width: 100%;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    padding: 13px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .save-btn:active { opacity: 0.8; }
+
+  /* ── RUN HISTORY ── */
+  .run-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+  .run-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .run-status {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+  }
+  .run-status.success { background: #00e5a022; color: var(--converted); }
+  .run-status.fail    { background: #ff4d6d22; color: var(--hot); }
+  .run-status.partial { background: #ffa50022; color: var(--warm); }
+  .run-status.running { background: #4db8ff22; color: #4db8ff; }
+  .run-date { font-size: 12px; color: var(--muted); }
+  .run-stats {
+    display: flex;
+    gap: 16px;
+  }
+  .run-stat { font-size: 12px; color: var(--muted); }
+  .run-stat span { color: var(--text); font-weight: 600; }
+
+  /* ── EMPTY STATE ── */
+  .empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .empty-icon { font-size: 40px; margin-bottom: 12px; }
+  .empty h3 { font-size: 16px; color: var(--text); margin-bottom: 6px; }
+  .empty p { font-size: 13px; line-height: 1.5; }
+
+  /* ── TOAST ── */
+  .toast {
+    position: fixed;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--accent);
+    color: #000;
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 700;
+    opacity: 0;
+    transition: all 0.3s;
+    z-index: 300;
+    white-space: nowrap;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ── BOTTOM NAV ── */
+  .bottom-nav {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: flex;
+    padding: 8px 0 20px;
+    z-index: 100;
+  }
+  .nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    cursor: pointer;
+    padding: 4px 0;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 600;
+    transition: color 0.2s;
+  }
+  .nav-item.active { color: var(--accent); }
+  .nav-icon { font-size: 20px; line-height: 1; }
+
+  /* ── LAPTOP / WIDER SCREENS ── */
+  @media (min-width: 768px) {
+    body { padding-bottom: 0; }
+    .bottom-nav { display: none; }
+    .header { padding: 20px 32px; }
+    .stats-bar {
+      grid-template-columns: repeat(4, 200px);
+      padding: 20px 32px 0;
+      justify-content: flex-start;
+    }
+    .tabs { padding: 16px 32px 0; }
+    .lead-list { padding: 16px 32px; max-width: 800px; }
+    .lead-card { padding: 18px; }
+    .desktop-nav {
+      display: flex !important;
+      gap: 8px;
+      align-items: center;
+    }
+    .desktop-tab {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .desktop-tab.active { background: var(--accent); border-color: var(--accent); color: #000; }
+  }
+  .desktop-nav { display: none; }
+
+  .loading-spinner {
+    text-align: center;
+    padding: 40px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<!-- SETUP SCREEN -->
+<div id="setupScreen" class="setup-screen" style="display:none">
+  <h2>LeadEngine</h2>
+  <p>Connect your Supabase project to get started. You'll only need to do this once.</p>
+  <div class="field-group">
+    <label class="field-label">Supabase Project URL</label>
+    <input class="field-input" id="sbUrl" type="url" placeholder="https://xxxx.supabase.co">
+  </div>
+  <div class="field-group">
+    <label class="field-label">Anon Public Key</label>
+    <input class="field-input" id="sbKey" type="password" placeholder="eyJ...">
+  </div>
+  <button class="connect-btn" onclick="saveConfig()">Connect Project →</button>
+</div>
+
+<!-- MAIN APP -->
+<div id="mainApp" style="display:none">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <div class="header-title">LeadEngine</div>
+      <div class="header-sub" id="lastSync">Loading...</div>
+    </div>
+    <div class="desktop-nav" id="desktopNav">
+      <div class="desktop-tab active" onclick="switchTab('hot')">🔥 Hot</div>
+      <div class="desktop-tab" onclick="switchTab('all')">All Leads</div>
+      <div class="desktop-tab" onclick="switchTab('followup')">Follow Up</div>
+      <div class="desktop-tab" onclick="switchTab('runs')">Runs</div>
+    </div>
+    <button class="sync-btn" id="syncBtn" onclick="loadData()">↻ Sync</button>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-bar">
+    <div class="stat-card">
+      <div class="stat-num hot" id="statHot">—</div>
+      <div class="stat-label">Hot</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num warm" id="statFollowup">—</div>
+      <div class="stat-label">Follow Up</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num done" id="statConverted">—</div>
+      <div class="stat-label">Converted</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num total" id="statTotal">—</div>
+      <div class="stat-label">Total</div>
+    </div>
+  </div>
+
+  <!-- Mobile Tabs -->
+  <div class="tabs" id="mobileTabs">
+    <div class="tab active" onclick="switchTab('hot')">🔥 Hot Leads</div>
+    <div class="tab" onclick="switchTab('all')">All Leads</div>
+    <div class="tab" onclick="switchTab('followup')">Follow Up</div>
+    <div class="tab" onclick="switchTab('runs')">Run History</div>
+  </div>
+
+  <!-- Content -->
+  <div class="lead-list" id="content"></div>
+
+  <!-- Bottom Nav -->
+  <div class="bottom-nav">
+    <div class="nav-item active" onclick="switchTab('hot')">
+      <div class="nav-icon">🔥</div>
+      <div>Hot</div>
+    </div>
+    <div class="nav-item" onclick="switchTab('all')">
+      <div class="nav-icon">📋</div>
+      <div>All</div>
+    </div>
+    <div class="nav-item" onclick="switchTab('followup')">
+      <div class="nav-icon">⏰</div>
+      <div>Follow Up</div>
+    </div>
+    <div class="nav-item" onclick="switchTab('runs')">
+      <div class="nav-icon">⚙️</div>
+      <div>Runs</div>
+    </div>
+  </div>
+</div>
+
+<!-- Status Modal -->
+<div class="modal-overlay" id="statusModal" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="modalTitle">Update Lead</div>
+    <div class="status-grid">
+      <div class="status-option new"       onclick="setStatus('new')">🔵 New</div>
+      <div class="status-option contacted" onclick="setStatus('contacted')">📞 Contacted</div>
+      <div class="status-option qualified" onclick="setStatus('qualified')">⭐ Qualified</div>
+      <div class="status-option converted" onclick="setStatus('converted')">✅ Converted</div>
+      <div class="status-option cold"      onclick="setStatus('cold')">❄️ Cold</div>
+      <div class="status-option"           onclick="setStatus('no_reply')" style="color:#ff4d6d">🚫 No Reply</div>
+    </div>
+    <textarea class="notes-area" id="notesArea" placeholder="Add notes about this lead..."></textarea>
+    <button class="save-btn" onclick="saveLead()">Save Changes</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── CONFIG ──────────────────────────────────────────────────
+const CONFIG_KEY = 'leadengine_config';
+let SUPABASE_URL = '';
+let SUPABASE_KEY = '';
+let currentTab = 'hot';
+let currentLeadId = null;
+let allLeads = [];
+
+function getConfig() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
+    return c;
+  } catch { return {}; }
+}
+
+function saveConfig() {
+  const url = document.getElementById('sbUrl').value.trim().replace(/\/$/, '');
+  const key = document.getElementById('sbKey').value.trim();
+  if (!url || !key) { showToast('Enter both URL and key'); return; }
+  localStorage.setItem(CONFIG_KEY, JSON.stringify({ url, key }));
+  SUPABASE_URL = url;
+  SUPABASE_KEY = key;
+  document.getElementById('setupScreen').style.display = 'none';
+  document.getElementById('mainApp').style.display = 'block';
+  loadData();
+}
+
+// ── API ──────────────────────────────────────────────────────
+async function sbFetch(path, options = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': options.prefer || 'return=minimal',
+      ...options.headers
+    },
+    ...options
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Supabase error ${res.status}: ${err}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function loadData() {
+  const btn = document.getElementById('syncBtn');
+  btn.classList.add('loading');
+  btn.textContent = '↻ Syncing';
+
+  try {
+    // Load all leads sorted by pain score
+    allLeads = await sbFetch(
+      'broker_leads?select=id,full_name,agency_name,phone_number,whatsapp_number,city,country,pain_score,pain_reason,contact_status,outreach_status,followup_due_at,notes,created_at&order=pain_score.desc,created_at.desc'
+    ) || [];
+
+    updateStats();
+    renderTab(currentTab);
+
+    const now = new Date();
+    document.getElementById('lastSync').textContent =
+      `Synced ${now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+  } catch(e) {
+    showToast('Sync failed — check connection');
+    console.error(e);
+  } finally {
+    btn.classList.remove('loading');
+    btn.textContent = '↻ Sync';
+  }
+}
+
+// ── STATS ────────────────────────────────────────────────────
+function updateStats() {
+  const hot       = allLeads.filter(l => l.pain_score >= 70 && l.contact_status === 'new').length;
+  const followup  = allLeads.filter(l => l.followup_due_at && new Date(l.followup_due_at) <= new Date() && !['converted','cold'].includes(l.contact_status)).length;
+  const converted = allLeads.filter(l => l.contact_status === 'converted').length;
+  const total     = allLeads.length;
+
+  document.getElementById('statHot').textContent       = hot;
+  document.getElementById('statFollowup').textContent  = followup;
+  document.getElementById('statConverted').textContent = converted;
+  document.getElementById('statTotal').textContent     = total;
+}
+
+// ── TABS ─────────────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+
+  // Update mobile tabs
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const tabs = ['hot','all','followup','runs'];
+    t.classList.toggle('active', tabs[i] === tab);
+  });
+
+  // Update desktop tabs
+  document.querySelectorAll('.desktop-tab').forEach((t, i) => {
+    const tabs = ['hot','all','followup','runs'];
+    t.classList.toggle('active', tabs[i] === tab);
+  });
+
+  // Update bottom nav
+  document.querySelectorAll('.nav-item').forEach((t, i) => {
+    const tabs = ['hot','all','followup','runs'];
+    t.classList.toggle('active', tabs[i] === tab);
+  });
+
+  renderTab(tab);
+}
+
+function renderTab(tab) {
+  const content = document.getElementById('content');
+
+  if (tab === 'runs') {
+    loadRuns();
+    return;
+  }
+
+  let leads = [...allLeads];
+
+  if (tab === 'hot') {
+    leads = leads.filter(l => l.pain_score >= 70 && l.contact_status === 'new');
+  } else if (tab === 'followup') {
+    leads = leads.filter(l =>
+      l.followup_due_at &&
+      new Date(l.followup_due_at) <= new Date() &&
+      !['converted','cold'].includes(l.contact_status)
+    );
+  }
+
+  if (leads.length === 0) {
+    content.innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">${tab === 'hot' ? '🔥' : tab === 'followup' ? '⏰' : '📋'}</div>
+        <h3>${tab === 'hot' ? 'No hot leads yet' : tab === 'followup' ? 'No follow-ups due' : 'No leads yet'}</h3>
+        <p>${tab === 'hot' ? 'Run the scraper to pull leads. Hot leads score 70+.' : tab === 'followup' ? 'All caught up.' : 'Connect PythonAnywhere and run your first scrape.'}</p>
+      </div>`;
+    return;
+  }
+
+  content.innerHTML = leads.map(lead => renderLeadCard(lead)).join('');
+}
+
+function renderLeadCard(lead) {
+  const score = lead.pain_score || 0;
+  const scoreClass = score >= 70 ? 'high' : score >= 40 ? 'mid' : 'low';
+  const cardClass  = score >= 70 ? 'score-high' : score >= 40 ? 'score-mid' : '';
+  const isConverted = lead.contact_status === 'converted' ? 'converted' : '';
+  const countryClass = (lead.country || '').toLowerCase() === 'uae' ? 'country-uae' : 'country-usa';
+
+  const phone = lead.whatsapp_number || lead.phone_number || '';
+  const cleanPhone = phone.replace(/[^\d+]/g, '');
+  const waLink = cleanPhone ? `https://wa.me/${cleanPhone}` : null;
+
+  const statusEmoji = {
+    new: '🔵', contacted: '📞', qualified: '⭐', converted: '✅', cold: '❄️', no_reply: '🚫'
+  }[lead.contact_status] || '🔵';
+
+  const followupDue = lead.followup_due_at && new Date(lead.followup_due_at) <= new Date()
+    ? `<div class="meta-chip" style="color:#ffa500;border-color:#ffa50033">⏰ Follow-up due</div>` : '';
+
+  return `
+    <div class="lead-card ${cardClass} ${isConverted}">
+      <div class="lead-top">
+        <div class="lead-name">${escHtml(lead.full_name || 'Unknown')}</div>
+        <div class="score-badge ${scoreClass}">${score}</div>
+      </div>
+      <div class="lead-meta">
+        <div class="meta-chip ${countryClass}">${escHtml(lead.city || '')} · ${escHtml(lead.country || '')}</div>
+        <div class="meta-chip">${statusEmoji} ${lead.contact_status || 'new'}</div>
+        ${followupDue}
+      </div>
+      ${lead.pain_reason ? `<div class="lead-reason">⚡ ${escHtml(lead.pain_reason)}</div>` : ''}
+      <div class="lead-actions">
+        ${waLink
+          ? `<a class="action-btn btn-wa" href="${waLink}" target="_blank">💬 WhatsApp</a>`
+          : `<div class="action-btn btn-wa" style="opacity:0.3;cursor:default">No number</div>`}
+        <button class="action-btn btn-status" onclick="openModal('${lead.id}','${escHtml(lead.full_name || '')}','${lead.contact_status || 'new'}')">
+          ${statusEmoji} Status
+        </button>
+      </div>
+    </div>`;
+}
+
+// ── RUN HISTORY ──────────────────────────────────────────────
+async function loadRuns() {
+  const content = document.getElementById('content');
+  content.innerHTML = '<div class="loading-spinner">Loading run history...</div>';
+
+  try {
+    const runs = await sbFetch(
+      'scraper_runs?select=*&order=started_at.desc&limit=20'
+    ) || [];
+
+    if (runs.length === 0) {
+      content.innerHTML = `
+        <div class="empty">
+          <div class="empty-icon">⚙️</div>
+          <h3>No runs yet</h3>
+          <p>Run your first scrape from PythonAnywhere to see results here.</p>
+        </div>`;
+      return;
+    }
+
+    content.innerHTML = runs.map(run => {
+      const date = new Date(run.started_at).toLocaleString([], {
+        month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+      return `
+        <div class="run-card">
+          <div class="run-top">
+            <div class="run-date">${date}</div>
+            <div class="run-status ${run.status || 'running'}">${run.status || 'running'}</div>
+          </div>
+          <div class="run-stats">
+            <div class="run-stat">Fetched <span>${run.leads_fetched || 0}</span></div>
+            <div class="run-stat">Added <span>${run.leads_inserted || 0}</span></div>
+            <div class="run-stat">Dupes <span>${run.duplicates_skipped || 0}</span></div>
+            <div class="run-stat">Skipped <span>${run.leads_skipped || 0}</span></div>
+          </div>
+          ${run.error_log ? `<div style="margin-top:8px;font-size:11px;color:var(--hot)">⚠️ ${escHtml(run.error_log.slice(0,120))}</div>` : ''}
+        </div>`;
+    }).join('');
+
+  } catch(e) {
+    content.innerHTML = `<div class="empty"><div class="empty-icon">❌</div><h3>Failed to load runs</h3><p>${e.message}</p></div>`;
+  }
+}
+
+// ── MODAL ────────────────────────────────────────────────────
+function openModal(id, name, status) {
+  currentLeadId = id;
+  document.getElementById('modalTitle').textContent = name;
+  const lead = allLeads.find(l => l.id === id);
+  document.getElementById('notesArea').value = lead?.notes || '';
+  document.getElementById('statusModal').classList.add('open');
+}
+
+function closeModal(e) {
+  if (e.target === document.getElementById('statusModal')) {
+    document.getElementById('statusModal').classList.remove('open');
+  }
+}
+
+function setStatus(status) {
+  document.querySelectorAll('.status-option').forEach(el => {
+    el.style.background = '';
+  });
+  event.target.style.background = 'rgba(0,229,160,0.1)';
+  event.target.dataset.selected = 'true';
+  document.querySelectorAll('.status-option').forEach(el => delete el.dataset.selected);
+  event.target.dataset.selected = 'true';
+  document.getElementById('statusModal').dataset.pendingStatus = status;
+}
+
+async function saveLead() {
+  if (!currentLeadId) return;
+  const status = document.getElementById('statusModal').dataset.pendingStatus;
+  const notes  = document.getElementById('notesArea').value;
+
+  const update = { notes, updated_at: new Date().toISOString() };
+  if (status) {
+    update.contact_status = status;
+    if (status === 'contacted') {
+      update.first_contact_at = new Date().toISOString();
+      update.followup_due_at  = new Date(Date.now() + 3*24*60*60*1000).toISOString();
+    }
+  }
+
+  try {
+    await sbFetch(`broker_leads?id=eq.${currentLeadId}`, {
+      method: 'PATCH',
+      prefer: 'return=minimal',
+      body: JSON.stringify(update)
+    });
+
+    // Update local state
+    const idx = allLeads.findIndex(l => l.id === currentLeadId);
+    if (idx > -1) Object.assign(allLeads[idx], update);
+
+    document.getElementById('statusModal').classList.remove('open');
+    updateStats();
+    renderTab(currentTab);
+    showToast('Saved ✓');
+  } catch(e) {
+    showToast('Save failed');
+    console.error(e);
+  }
+}
+
+// ── UTILITIES ────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
+
+// ── INIT ─────────────────────────────────────────────────────
+(function init() {
+  const config = getConfig();
+  if (config.url && config.key) {
+    SUPABASE_URL = config.url;
+    SUPABASE_KEY = config.key;
+    document.getElementById('mainApp').style.display = 'block';
+    loadData();
+  } else {
+    document.getElementById('setupScreen').style.display = 'block';
+  }
+})();
+</script>
+</body>
+</html>
