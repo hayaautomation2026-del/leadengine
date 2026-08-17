@@ -1,23 +1,27 @@
-name: LeadEngine Finder
+name: LeadEngine Finder Worker
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/scrape.yml'
   schedule:
-    - cron: '0 3 * * 1'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       search_request:
-        description: 'What to find, e.g. dentists in Utah'
+        description: 'Optional direct test search'
         required: false
         type: string
       hard_cap:
-        description: 'Maximum leads to save this run'
+        description: 'Maximum leads for a direct test'
         required: false
         default: '20'
         type: string
 
 concurrency:
-  group: leadengine-finder
-  cancel-in-progress: true
+  group: leadengine-finder-worker
+  cancel-in-progress: false
 
 jobs:
   scrape:
@@ -32,11 +36,11 @@ jobs:
           python-version: '3.12'
       - name: Install Python dependency
         run: pip install requests
-      - name: Pull current open-source Maps finder
+      - name: Pull replaceable Maps finder
         run: docker pull gosom/google-maps-scraper:latest
-      - name: Run LeadEngine finder
+      - name: Process one Supabase search request
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SEARCH_REQUEST: ${{ inputs.search_request }}
           HARD_CAP_LEADS: ${{ inputs.hard_cap || '20' }}
