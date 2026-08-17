@@ -24,39 +24,57 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Check Supabase worker key
+      - name: Check key and pending work
         id: preflight
         env:
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DIRECT_REQUEST: ${{ inputs.search_request }}
         run: |
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://jequjltbvofmhfnbsfzt.supabase.co/rest/v1/search_requests?select=id&limit=1" \
+          if [ -z "$SUPABASE_KEY" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Worker secret is missing; stopping safely."
+            exit 0
+          fi
+
+          if [ -n "$DIRECT_REQUEST" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Direct worker request supplied."
+            exit 0
+          fi
+
+          response=$(curl --fail --silent --show-error \
+            "https://jequjltbvofmhfnbsfzt.supabase.co/rest/v1/search_requests?status=eq.pending&select=id&order=created_at.asc&limit=1" \
             -H "apikey: $SUPABASE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_KEY")
-          if [ "$code" = "200" ]; then
-            echo "valid=true" >> "$GITHUB_OUTPUT"
-            echo "Supabase worker key is valid."
+            -H "Authorization: Bearer $SUPABASE_KEY") || {
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              echo "Supabase preflight failed; stopping safely."
+              exit 0
+            }
+
+          if [ "$response" = "[]" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Queue empty. Skipping checkout, Python and Docker."
           else
-            echo "valid=false" >> "$GITHUB_OUTPUT"
-            echo "Supabase worker key is not configured for the LeadEngine project yet; worker will sleep."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Pending LeadEngine work found."
           fi
 
       - name: Checkout code
-        if: steps.preflight.outputs.valid == 'true'
+        if: steps.preflight.outputs.run == 'true'
         uses: actions/checkout@v4
       - name: Set up Python
-        if: steps.preflight.outputs.valid == 'true'
+        if: steps.preflight.outputs.run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install Python dependency
-        if: steps.preflight.outputs.valid == 'true'
+        if: steps.preflight.outputs.run == 'true'
         run: pip install requests
       - name: Pull replaceable Maps finder
-        if: steps.preflight.outputs.valid == 'true'
+        if: steps.preflight.outputs.run == 'true'
         run: docker pull gosom/google-maps-scraper:latest
       - name: Process one Supabase search request
-        if: steps.preflight.outputs.valid == 'true'
+        if: steps.preflight.outputs.run == 'true'
         env:
           SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
