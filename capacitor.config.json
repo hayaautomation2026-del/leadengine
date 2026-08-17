@@ -1,0 +1,8 @@
+{
+  "appId": "com.hayaautomation.leadengine",
+  "appName": "LeadEngine",
+  "webDir": "webapp",
+  "server": {
+    "androidScheme": "https"
+  }
+}
