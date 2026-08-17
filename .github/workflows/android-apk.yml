@@ -23,6 +23,62 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fix password screen for this build
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('app/src/main/java/com/hayaautomation/leadengine/MainActivity.kt')
+          s = p.read_text()
+          replacement = r'''@Composable
+private fun ChangePasswordScreen(error: String?, onChange: (String) -> Unit) {
+    var first by remember { mutableStateOf("") }
+    var second by remember { mutableStateOf("") }
+    var localError by remember { mutableStateOf<String?>(null) }
+    val longEnough = first.length >= 12
+    val matches = first == second && second.isNotEmpty()
+    Box(Modifier.fillMaxSize().background(Bg), contentAlignment = Alignment.Center) {
+        Card(Modifier.fillMaxWidth().padding(20.dp), colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.padding(20.dp)) {
+                Text("Create your private password", color = Text, fontWeight = FontWeight.Black, fontSize = 22.sp)
+                Text("Use at least 12 characters. Both boxes must be identical.", color = Muted, fontSize = 11.sp)
+                Spacer(Modifier.height(16.dp))
+                PasswordField("New password", first) { first = it; localError = null }
+                Text(first.length.toString() + "/12 characters", color = if (longEnough) Green else Muted, fontSize = 11.sp)
+                Spacer(Modifier.height(10.dp))
+                PasswordField("Repeat password", second) { second = it; localError = null }
+                if (second.isNotEmpty()) {
+                    Text(if (matches) "Passwords match ✓" else "Passwords do not match", color = if (matches) Green else ErrorRed, fontSize = 11.sp)
+                }
+                localError?.let { Text(it, color = ErrorRed, fontSize = 11.sp) }
+                error?.let { Text(it, color = ErrorRed, fontSize = 11.sp) }
+                Spacer(Modifier.height(14.dp))
+                Button(
+                    onClick = {
+                        when {
+                            first.length < 12 -> localError = "Password must be at least 12 characters."
+                            first != second -> localError = "The two passwords are different."
+                            else -> { localError = null; onChange(first) }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Bg)
+                ) {
+                    Text("Save private password", fontWeight = FontWeight.Black)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PasswordField'''
+          s2, n = re.subn(r'@Composable\nprivate fun ChangePasswordScreen\(.*?\n@Composable\nprivate fun PasswordField', replacement, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('Password screen patch failed')
+          p.write_text(s2)
+          PY
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
