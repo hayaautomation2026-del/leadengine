@@ -1,525 +1,333 @@
 """
-Real Estate Broker Lead Scraper
-================================
-Target: UAE + USA real estate brokers
-Source: Outscraper Google Maps API
-Destination: Supabase broker_leads table
-Pain Signal: Detects brokers with no automation/WhatsApp visible
-Schedule: Weekly via GitHub Actions
+LeadEngine Finder + Qualifier
+=============================
+LeadEngine owns the workflow. Finders are replaceable data sources.
 
-Built for: Phone-only management, zero budget, Karachi timezone
+Current finder: gosom/google-maps-scraper (open-source Docker image)
+Destination: Supabase broker_leads + scraper_runs
+
+Manual example:
+  SEARCH_REQUEST="dentists in Utah" python scraper.py
+
+No Google Maps API / SerpApi key is required for the current finder.
 """
 
+import csv
+import hashlib
 import os
-import re
-import time
 import random
-import requests
+import re
+import subprocess
+import tempfile
+import time
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+import requests
 from supabase import create_client, Client
 
-# ============================================================
-# RETRY CONFIG
-# ============================================================
-MAX_RETRIES = 3
-RETRY_BACKOFF_BASE = 2  # Seconds — doubles each retry (2, 4, 8)
-
-# ============================================================
-# CONFIG — Set these as GitHub Secrets, never hardcode
-# ============================================================
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-OUTSCRAPER_API_KEY = os.environ.get("OUTSCRAPER_API_KEY")
+SEARCH_REQUEST = (os.environ.get("SEARCH_REQUEST") or "").strip()
+FINDER_SOURCE = (os.environ.get("FINDER_SOURCE") or "gosom_gmaps").strip()
 
-# Validate all secrets present
+HARD_CAP_LEADS = int(os.environ.get("HARD_CAP_LEADS", "20"))
+MAX_RETRIES = 3
+RETRY_BACKOFF_BASE = 2
+REQUEST_DELAY_MIN = 1
+REQUEST_DELAY_MAX = 3
+
+# Runs when no manual SEARCH_REQUEST is supplied.
+SAVED_SEARCHES = [
+    "real estate brokers in Dubai UAE",
+    "real estate agencies in Abu Dhabi UAE",
+    "real estate brokers in Miami Florida USA",
+    "real estate brokers in Houston Texas USA",
+]
+
+
 def validate_env():
     missing = []
-    if not SUPABASE_URL: missing.append("SUPABASE_URL")
-    if not SUPABASE_KEY: missing.append("SUPABASE_KEY")
-    if not OUTSCRAPER_API_KEY: missing.append("OUTSCRAPER_API_KEY")
+    if not SUPABASE_URL:
+        missing.append("SUPABASE_URL")
+    if not SUPABASE_KEY:
+        missing.append("SUPABASE_KEY")
     if missing:
         raise EnvironmentError(f"Missing required secrets: {', '.join(missing)}")
 
-# ============================================================
-# TARGETS
-# Weekly rotation — update in GitHub web editor from phone
-# Swap cities each week to maximize coverage
-# ============================================================
-TARGETS = [
-    {"query": "real estate broker", "location": "Dubai, UAE", "country": "UAE"},
-    {"query": "real estate agency",  "location": "Abu Dhabi, UAE", "country": "UAE"},
-    {"query": "real estate broker",  "location": "Miami, FL, USA", "country": "USA"},
-    {"query": "real estate broker",  "location": "Houston, TX, USA", "country": "USA"},
-]
 
-MAX_RESULTS_PER_QUERY = 20   # Keep weekly total under free tier limits
-REQUEST_DELAY_MIN = 3        # Seconds — polite scraping
-REQUEST_DELAY_MAX = 7
-HARD_CAP_LEADS = 20          # First live run cap — do not change until data observed
-
-# ============================================================
-# PHONE CLEANING
-# ============================================================
 def clean_phone(raw):
     if not raw:
         return None
-    cleaned = re.sub(r'[^\d+]', '', str(raw))
+    cleaned = re.sub(r"[^\d+]", "", str(raw))
     if len(cleaned) < 7:
         return None
-    return cleaned[:20]
+    return cleaned[:30]
+
 
 def is_whatsapp_likely(phone):
-    """UAE mobile numbers are almost always on WhatsApp"""
     if not phone:
         return False
-    return "+971" in phone or phone.startswith("971") or (
-        # UAE mobile prefix
-        any(phone.startswith(p) for p in ["050", "055", "056", "058", "052", "054"])
+    return "+971" in phone or phone.startswith("971") or any(
+        phone.startswith(p) for p in ["050", "052", "054", "055", "056", "058"]
     )
 
-# ============================================================
-# PAIN SIGNAL DETECTION
-# Objective signals only — detectable from public data
-# ============================================================
-def validate_lead(lead: dict) -> bool:
+
+def pick(row, *names):
+    """Return the first non-empty field, case-insensitively."""
+    lowered = {str(k).lower(): v for k, v in row.items()}
+    for name in names:
+        value = lowered.get(name.lower())
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def run_gosom_google_maps(search_request, limit=20):
+    """Run the open-source Google Maps scraper as one replaceable finder."""
+    print(f"\nFINDER [gosom_gmaps] → {search_request}")
+
+    with tempfile.TemporaryDirectory(prefix="leadengine_") as tmp:
+        tmp_path = Path(tmp)
+        queries = tmp_path / "queries.txt"
+        output = tmp_path / "results.csv"
+        queries.write_text(search_request + "\n", encoding="utf-8")
+
+        cmd = [
+            "docker", "run", "--rm",
+            "-v", "gmaps-playwright-cache:/opt",
+            "-v", f"{queries}:/queries.txt:ro",
+            "-v", f"{tmp_path}:/out",
+            "gosom/google-maps-scraper",
+            "-input", "/queries.txt",
+            "-results", "/out/results.csv",
+            "-depth", "1",
+            "-c", "1",
+            "-exit-on-inactivity", "2m",
+        ]
+
+        completed = subprocess.run(cmd, text=True, capture_output=True, timeout=420)
+        if completed.returncode != 0:
+            details = (completed.stderr or completed.stdout or "unknown scraper error")[-1500:]
+            raise RuntimeError(f"gosom finder failed: {details}")
+        if not output.exists():
+            raise RuntimeError("gosom finder completed but produced no results file")
+
+        rows = []
+        with output.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Flexible mapping protects us from harmless upstream column naming changes.
+                rows.append({
+                    "name": pick(row, "title", "name"),
+                    "phone": pick(row, "phone", "telephone"),
+                    "site": pick(row, "website", "web_site", "site"),
+                    "url": pick(row, "link", "google_maps_url", "url"),
+                    "address": pick(row, "address", "complete_address"),
+                    "category": pick(row, "category", "categories"),
+                    "rating": pick(row, "review_rating", "rating"),
+                    "reviews": pick(row, "reviews", "review_count", "reviews_count"),
+                })
+                if len(rows) >= limit:
+                    break
+
+        print(f"FINDER returned {len(rows)} rows")
+        return rows
+
+
+def find_businesses(search_request, limit=20):
     """
-    Validation gate — blocks garbage from entering DB.
-    Returns True only if lead meets minimum quality bar.
+    Single LeadEngine finder interface.
+    Add future sources here without changing scoring/database/dashboard code.
     """
-    phone = lead.get("phone_number")
-    name = lead.get("full_name")
-
-    if not phone or len(phone) < 8:
-        print(f"  VALIDATION FAILED: Phone too short or missing — '{phone}'")
-        return False
-    if not name or len(name.strip()) < 2:
-        print(f"  VALIDATION FAILED: Name missing or too short — '{name}'")
-        return False
-    if not lead.get("city"):
-        print(f"  VALIDATION FAILED: City missing for {name}")
-        return False
-
-    return True
-
-def make_fingerprint(lead: dict) -> str:
-    """
-    Composite dedup fingerprint beyond phone number.
-    Catches same broker listed under different numbers.
-    """
-    import hashlib
-    # Uses full_name + agency_name + city per spec
-    raw = (
-        (lead.get('full_name') or '').lower().strip() +
-        (lead.get('agency_name') or '').lower().strip() +
-        (lead.get('city') or '').lower().strip()
-    )
-    return hashlib.md5(raw.encode()).hexdigest()[:16]
+    if FINDER_SOURCE == "gosom_gmaps":
+        return run_gosom_google_maps(search_request, limit)
+    raise ValueError(f"Unknown FINDER_SOURCE: {FINDER_SOURCE}")
 
 
-def calculate_pain_score(lead_data):
-    """
-    PENALTY-BASED scoring model v2.
-    Start at 100. Subtract for detected automation maturity.
-    Unknown signals = NEUTRAL. Never inflate due to missing data.
-
-    Score interpretation:
-    80-100 = Highly vulnerable — no visible lead handling
-    60-79  = Moderate — some automation but gaps exist
-    40-59  = Partial — has basic systems
-    0-39   = Low priority — well automated, skip
-    """
-    score = 100
-    deductions = []
-    notes = []
-
-    if lead_data.get("has_whatsapp_button"):
-        score -= 20
-        deductions.append("WhatsApp present (-20)")
-
-    if lead_data.get("has_website_chatbot"):
-        score -= 25
-        deductions.append("Chatbot detected (-25)")
-
-    contact_channels = sum([
-        bool(lead_data.get("has_whatsapp_button")),
-        bool(lead_data.get("has_inquiry_form")),
-        bool(lead_data.get("has_afterhours_contact")),
-        bool(lead_data.get("has_website_chatbot")),
-    ])
-    if contact_channels >= 2:
-        score -= 15
-        deductions.append("Multiple contact channels (-15)")
-
-    if lead_data.get("has_inquiry_form"):
-        score -= 10
-        deductions.append("Inquiry form present (-10)")
-
-    if not lead_data.get("website_url"):
-        notes.append("No website — signals unknown")
-
-    score = max(0, score)
-    pain_reason = " | ".join(deductions) if deductions else "No automation detected"
-    if notes:
-        pain_reason += " | " + " | ".join(notes)
-
-    return score, pain_reason
-
-
-# ============================================================
-# WEBSITE CHECKER
-# Checks public website for pain signals
-# ============================================================
 def check_website(url):
-    """
-    Checks a broker website for automation signals.
-    Returns dict of boolean flags.
-    """
     result = {
         "has_website_chatbot": False,
         "has_inquiry_form": False,
         "has_afterhours_contact": False,
         "has_whatsapp_button": False,
     }
-
     if not url:
         return result
 
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"
-        }
-        response = requests.get(url, headers=headers, timeout=10)
-        html = response.text.lower()
-
-        # Chatbot indicators
-        chatbot_signals = ["intercom", "drift", "tidio", "crisp", "zendesk", "freshchat", 
-                          "livechat", "tawk.to", "chat-widget", "chatbot", "live chat"]
-        result["has_website_chatbot"] = any(s in html for s in chatbot_signals)
-
-        # WhatsApp button
-        wa_signals = ["wa.me", "whatsapp", "api.whatsapp"]
-        result["has_whatsapp_button"] = any(s in html for s in wa_signals)
-
-        # Inquiry form
-        form_signals = ["contact-form", "inquiry-form", "enquiry", "<form", "contact us"]
-        result["has_inquiry_form"] = any(s in html for s in form_signals)
-
-        # After hours contact
-        afterhours_signals = ["after hours", "24/7", "available anytime", "after-hours",
-                              "outside office", "emergency contact"]
-        result["has_afterhours_contact"] = any(s in html for s in afterhours_signals)
-
-    except Exception as e:
-        print(f"    Website check failed for {url}: {e}")
-
+        response = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 LeadEngine/1.0"},
+            timeout=8,
+            allow_redirects=True,
+        )
+        html = response.text.lower()[:1_500_000]
+        result["has_website_chatbot"] = any(
+            s in html for s in ["intercom", "drift", "tidio", "crisp", "zendesk", "freshchat", "tawk.to", "chatbot", "live chat"]
+        )
+        result["has_whatsapp_button"] = any(s in html for s in ["wa.me", "whatsapp", "api.whatsapp"])
+        result["has_inquiry_form"] = any(s in html for s in ["contact-form", "inquiry-form", "enquiry", "<form", "contact us"])
+        result["has_afterhours_contact"] = any(
+            s in html for s in ["after hours", "24/7", "available anytime", "after-hours", "emergency contact"]
+        )
+    except Exception as exc:
+        print(f"Website check skipped: {url} ({exc})")
     return result
 
-# ============================================================
-# OUTSCRAPER API CALL
-# ============================================================
-def fetch_from_serpapi(query, location, limit=20):
-    """
-    Calls SerpApi Google Maps search.
-    Free tier: 100 searches/month — no credit card needed.
-    Sign up free at serpapi.com
-    Retries up to MAX_RETRIES times with exponential backoff.
-    """
-    print(f"\n  Fetching: '{query}' in '{location}'")
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            response = requests.get(
-                "https://serpapi.com/search",
-                params={
-                    "engine": "google_maps",
-                    "q": f"{query} {location}",
-                    "type": "search",
-                    "api_key": OUTSCRAPER_API_KEY,
-                    "hl": "en",
-                },
-                timeout=30
-            )
+def calculate_pain_score(lead):
+    score = 100
+    reasons = []
 
-            if response.status_code == 200:
-                data = response.json()
-                results = data.get("local_results", [])
-                print(f"  Got {len(results)} results")
+    if lead.get("has_whatsapp_button"):
+        score -= 20
+        reasons.append("WhatsApp present")
+    if lead.get("has_website_chatbot"):
+        score -= 25
+        reasons.append("Chatbot detected")
+    if lead.get("has_inquiry_form"):
+        score -= 10
+        reasons.append("Inquiry form present")
 
-                if len(results) == 0:
-                    raise RuntimeError(f"API returned 0 results for '{query}' in '{location}' — marking run FAILED")
+    channels = sum(bool(lead.get(k)) for k in [
+        "has_whatsapp_button", "has_inquiry_form", "has_afterhours_contact", "has_website_chatbot"
+    ])
+    if channels >= 2:
+        score -= 15
+        reasons.append("Multiple contact channels")
 
-                if len(results) < 5 and limit >= 10:
-                    print(f"  WARNING: Low result count ({len(results)}) — possible rate limit")
+    if not lead.get("website_url"):
+        reasons.append("No website; automation signals unknown")
 
-                normalized = []
-                for r in results:
-                    normalized.append({
-                        "name": r.get("title", ""),
-                        "phone": r.get("phone", ""),
-                        "site": r.get("website", ""),
-                        "url": r.get("place_id_search", ""),
-                        "city": location.split(",")[0].strip(),
-                        "full_address": r.get("address", ""),
-                        "country": location,
-                    })
-                return normalized
+    return max(0, score), " | ".join(reasons) if reasons else "No obvious automation detected"
 
-            elif response.status_code == 429:
-                wait = RETRY_BACKOFF_BASE ** attempt
-                print(f"  Rate limited. Waiting {wait}s before retry {attempt}/{MAX_RETRIES}")
-                time.sleep(wait)
 
-            else:
-                msg = f"API FAILED: SerpApi returned {response.status_code}: {response.text[:200]}"
-                print(f"  {msg}")
-                raise RuntimeError(msg)
+def make_fingerprint(lead):
+    raw = "|".join([
+        (lead.get("full_name") or "").lower().strip(),
+        (lead.get("agency_name") or "").lower().strip(),
+        (lead.get("phone_number") or "").strip(),
+    ])
+    return hashlib.md5(raw.encode()).hexdigest()[:16]
 
-        except requests.exceptions.Timeout:
-            wait = RETRY_BACKOFF_BASE ** attempt
-            print(f"  TIMEOUT on attempt {attempt}/{MAX_RETRIES}. Retrying in {wait}s")
-            time.sleep(wait)
 
-        except RuntimeError:
-            raise
-
-        except Exception as e:
-            print(f"  ERROR: SerpApi request failed (attempt {attempt}/{MAX_RETRIES}): {e}")
-            if attempt == MAX_RETRIES:
-                raise RuntimeError(f"All retries exhausted: {e}")
-            time.sleep(RETRY_BACKOFF_BASE ** attempt)
-
-    raise RuntimeError(f"All {MAX_RETRIES} retries exhausted for '{query}' in '{location}'")
-
-def upsert_lead(supabase: Client, lead: dict):
-    """
-    Inserts or updates lead by phone number.
-    Skips duplicates silently.
-    Retries on transient errors.
-    Returns True if new lead added.
-    """
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            supabase.table("broker_leads").upsert(
-                lead,
-                on_conflict="phone_number",
-                ignore_duplicates=True
-            ).execute()
-            return True
-
-        except Exception as e:
-            error_str = str(e).lower()
-            if "duplicate" in error_str or "unique" in error_str:
-                return False  # Expected — already exists
-            print(f"  ERROR: Supabase upsert attempt {attempt}/{MAX_RETRIES}: {e}")
-            if attempt < MAX_RETRIES:
-                time.sleep(RETRY_BACKOFF_BASE ** attempt)
-
-    print(f"  FAILED: Could not upsert lead '{lead.get('full_name')}' after {MAX_RETRIES} attempts")
-    return False
-
-# ============================================================
-# PROCESS ONE RESULT
-# ============================================================
-def process_result(raw, country):
-    """
-    Converts raw Outscraper result to clean lead dict.
-    Runs website check and pain scoring.
-    """
+def process_result(raw, search_request):
     phone = clean_phone(raw.get("phone"))
-    if not phone:
-        return None  # No phone = not actionable
+    name = (raw.get("name") or "").strip()[:150]
+    if not phone or len(name) < 2:
+        return None
 
-    name = (raw.get("name") or "").strip()[:100]
-    website = raw.get("site") or ""
-    maps_url = raw.get("url") or ""
-    city = raw.get("city") or raw.get("full_address", "").split(",")[0]
-
-    # Check website for pain signals
-    print(f"  Checking: {name} — {website or 'no website'}")
-    website_signals = check_website(website)
-
-    # Build lead dict
+    website = (raw.get("site") or "").strip()
+    signals = check_website(website)
     lead = {
         "full_name": name,
         "agency_name": name,
         "phone_number": phone,
         "whatsapp_number": phone if is_whatsapp_likely(phone) else None,
         "website_url": website or None,
-        "google_maps_url": maps_url or None,
-        "city": city,
-        "country": country,
-        "source": "outscraper_maps",
+        "google_maps_url": raw.get("url") or None,
+        "city": None,
+        "country": None,
+        "source": FINDER_SOURCE,
+        "source_url": raw.get("url") or None,
         "contact_status": "new",
         "outreach_status": "pending",
         "last_checked_at": datetime.now(timezone.utc).isoformat(),
         "followup_due_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
-        **website_signals
+        "notes": f"Search: {search_request}"[:1000],
+        **signals,
     }
-
-    # Validation gate — block garbage before scoring or insert
-    if not validate_lead(lead):
-        return None
-
-    # Calculate pain score
-    pain_score, pain_reason = calculate_pain_score(lead)
-    lead["pain_score"] = pain_score
-    lead["pain_reason"] = pain_reason
+    score, reason = calculate_pain_score(lead)
+    lead["pain_score"] = score
+    lead["pain_reason"] = reason
     lead["lead_fingerprint"] = make_fingerprint(lead)
-    lead["scoring_version"] = "v1"
-
+    lead["scoring_version"] = "v2"
     return lead
 
-# ============================================================
-# RUN TRACKING
-# ============================================================
-def start_run(supabase: Client) -> str:
-    """Creates a run record. Returns run_id."""
-    try:
-        result = supabase.table("scraper_runs").insert({
-            "status": "running",
-            "started_at": datetime.now(timezone.utc).isoformat()
-        }).execute()
-        run_id = result.data[0]["run_id"]
-        print(f"  Run ID: {run_id}")
-        return run_id
-    except Exception as e:
-        print(f"  WARNING: Could not create run record: {e}")
-        return None
 
-def finish_run(supabase: Client, run_id: str, stats: dict, errors: list):
-    """Updates run record with final stats and status."""
+def start_run(supabase: Client):
+    result = supabase.table("scraper_runs").insert({
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }).execute()
+    return result.data[0]["run_id"]
+
+
+def finish_run(supabase: Client, run_id, stats, errors):
     if not run_id:
         return
+    status = "success" if stats["leads_inserted"] > 0 and not errors else (
+        "partial" if stats["leads_inserted"] > 0 else "fail"
+    )
+    supabase.table("scraper_runs").update({
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "leads_fetched": stats["leads_fetched"],
+        "leads_inserted": stats["leads_inserted"],
+        "leads_skipped": stats["leads_skipped"],
+        "duplicates_skipped": stats["duplicates_skipped"],
+        "error_log": "\n".join(errors) if errors else None,
+        "status": status,
+    }).eq("run_id", run_id).execute()
 
-    has_errors = len(errors) > 0
-    has_data = stats["leads_inserted"] > 0
-    status = "success" if has_data and not has_errors else \
-             "partial" if has_data and has_errors else \
-             "fail"
 
-    try:
-        supabase.table("scraper_runs").update({
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "leads_fetched": stats["leads_fetched"],
-            "leads_inserted": stats["leads_inserted"],
-            "leads_skipped": stats["leads_skipped"],
-            "duplicates_skipped": stats["duplicates_skipped"],
-            "error_log": "\n".join(errors) if errors else None,
-            "status": status
-        }).eq("run_id", run_id).execute()
-        print(f"  Run status: {status.upper()}")
-    except Exception as e:
-        print(f"  WARNING: Could not update run record: {e}")
+def insert_lead(supabase: Client, lead):
+    """Returns True for a newly accepted row; False for an existing phone."""
+    existing = supabase.table("broker_leads").select("id").eq("phone_number", lead["phone_number"]).limit(1).execute()
+    if existing.data:
+        return False
+    supabase.table("broker_leads").insert(lead).execute()
+    return True
 
-# ============================================================
-# MAIN RUNNER
-# ============================================================
+
 def main():
-    print("=" * 60)
-    print("BROKER LEAD SCRAPER v2 — Controlled First Run")
-    print(f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"Hard cap: {HARD_CAP_LEADS} leads max this run")
-    print("=" * 60)
-
     validate_env()
-
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("Supabase connected OK")
-
-    # Start run tracking — fail fast if table missing
     run_id = start_run(supabase)
-    if not run_id:
-        raise RuntimeError("CRITICAL: scraper_runs table missing or inaccessible. Run schema.sql first.")
+    searches = [SEARCH_REQUEST] if SEARCH_REQUEST else SAVED_SEARCHES
 
-    stats = {
-        "leads_fetched": 0,
-        "leads_inserted": 0,
-        "leads_skipped": 0,
-        "duplicates_skipped": 0,
-    }
+    stats = {"leads_fetched": 0, "leads_inserted": 0, "leads_skipped": 0, "duplicates_skipped": 0}
     errors = []
 
+    print("=" * 60)
+    print("LEADENGINE FINDER v3")
+    print(f"Finder: {FINDER_SOURCE}")
+    print(f"Searches: {searches}")
+    print(f"Hard cap: {HARD_CAP_LEADS}")
+    print("=" * 60)
+
     try:
-        for target in TARGETS:
-
-            # Hard cap check before each query
+        for search_request in searches:
             if stats["leads_inserted"] >= HARD_CAP_LEADS:
-                print(f"\n  HARD CAP REACHED ({HARD_CAP_LEADS}). Stopping.")
                 break
-
-            raw_results = fetch_from_serpapi(
-                query=target["query"],
-                location=target["location"],
-                limit=MAX_RESULTS_PER_QUERY
-            )
+            try:
+                raw_results = find_businesses(search_request, HARD_CAP_LEADS)
+            except Exception as exc:
+                errors.append(f"Finder failed for '{search_request}': {exc}")
+                continue
 
             for raw in raw_results:
-
-                # Hard cap check per lead
                 if stats["leads_inserted"] >= HARD_CAP_LEADS:
-                    print(f"  HARD CAP REACHED. Stopping mid-batch.")
                     break
-
                 stats["leads_fetched"] += 1
-
                 try:
-                    lead = process_result(raw, target["country"])
-                except Exception as e:
-                    msg = f"ERROR processing lead '{raw.get('name', 'unknown')}': {e}"
-                    print(f"  {msg}")
-                    errors.append(msg)
+                    lead = process_result(raw, search_request)
+                    if not lead:
+                        stats["leads_skipped"] += 1
+                        continue
+                    if insert_lead(supabase, lead):
+                        stats["leads_inserted"] += 1
+                        print(f"ADDED {lead['full_name']} | score {lead['pain_score']}")
+                    else:
+                        stats["duplicates_skipped"] += 1
+                except Exception as exc:
                     stats["leads_skipped"] += 1
-                    continue
-
-                if not lead:
-                    stats["leads_skipped"] += 1
-                    continue
-
-                try:
-                    is_new = upsert_lead(supabase, lead)
-                except Exception as e:
-                    msg = f"ERROR inserting lead '{lead.get('full_name', 'unknown')}': {e}"
-                    print(f"  {msg}")
-                    errors.append(msg)
-                    stats["leads_skipped"] += 1
-                    continue
-
-                if is_new:
-                    stats["leads_inserted"] += 1
-                    qualified = "✅ QUALIFIED" if lead["pain_score"] >= 50 else "—"
-                    print(f"  [{stats['leads_inserted']}/{HARD_CAP_LEADS}] Added: {lead['full_name']} | Score: {lead['pain_score']} | {qualified}")
-                else:
-                    stats["duplicates_skipped"] += 1
-                    print(f"  Duplicate skipped: {lead['full_name']}")
-
+                    errors.append(f"Lead processing failed: {exc}")
                 time.sleep(random.uniform(REQUEST_DELAY_MIN, REQUEST_DELAY_MAX))
-
-            print(f"\n  Waiting before next target...")
-            time.sleep(random.uniform(10, 20))
-
-    except Exception as e:
-        msg = f"CRITICAL ERROR in main loop: {e}"
-        print(f"\n  {msg}")
-        errors.append(msg)
-
     finally:
-        # Always write run results — even on crash
         finish_run(supabase, run_id, stats, errors)
+        print(f"DONE: {stats} | errors={len(errors)}")
 
-        print("\n" + "=" * 60)
-        print("RUN COMPLETE")
-        print(f"  Leads fetched:      {stats['leads_fetched']}")
-        print(f"  Leads inserted:     {stats['leads_inserted']}")
-        print(f"  Duplicates skipped: {stats['duplicates_skipped']}")
-        print(f"  Leads skipped:      {stats['leads_skipped']}")
-        print(f"  Errors:             {len(errors)}")
-        if errors:
-            print("\n  ERROR LOG:")
-            for err in errors:
-                print(f"    - {err}")
-        print("=" * 60)
-        print("\nNext: Open Supabase, sort broker_leads by pain_score DESC.")
-        print("Contact top leads manually on WhatsApp. Do not scale yet.")
 
 if __name__ == "__main__":
     main()
