@@ -78,8 +78,8 @@ private fun FastLogin(done: () -> Unit) {
                 Column(Modifier.padding(20.dp)) {
                     Text("⚡ LeadEngine", color = green, fontWeight = FontWeight.Black, fontSize = 28.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text("Unlock", color = text, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    Text("Enter your password.", color = muted, fontSize = 11.sp)
+                    Text("Enter password", color = text, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    Text("No user ID. No email. Just your password.", color = muted, fontSize = 11.sp)
                     Spacer(Modifier.height(16.dp))
                     OutlinedTextField(
                         value = password,
