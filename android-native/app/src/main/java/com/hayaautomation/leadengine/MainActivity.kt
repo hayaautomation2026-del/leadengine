@@ -132,14 +132,12 @@ private fun LoginScreen(error: String?, onLogin: (String) -> Unit) {
         Card(Modifier.fillMaxWidth().padding(20.dp), colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.padding(20.dp)) {
                 Text("⚡ LeadEngine", color = Green, fontWeight = FontWeight.Black, fontSize = 28.sp)
-                Text("OWNER SIGN-IN", color = Muted, fontSize = 11.sp)
+                Text("PRIVATE ACCESS", color = Muted, fontSize = 11.sp)
                 Spacer(Modifier.height(18.dp))
-                OutlinedTextField(value = OWNER_EMAIL, onValueChange = {}, readOnly = true, label = { Text("Owner") }, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
-                    label = { Text("Password") },
+                    label = { Text("Your password") },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     singleLine = true,
@@ -152,7 +150,7 @@ private fun LoginScreen(error: String?, onLogin: (String) -> Unit) {
                     enabled = !busy && password.isNotBlank(),
                     modifier = Modifier.fillMaxWidth().height(54.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Bg)
-                ) { Text("Unlock LeadEngine", fontWeight = FontWeight.Black) }
+                ) { Text("Open LeadEngine", fontWeight = FontWeight.Black) }
                 Spacer(Modifier.height(8.dp))
                 Text("Your session is stored encrypted by Android. The owner password is never saved in the app.", color = Muted, fontSize = 10.sp)
             }
