@@ -4,7 +4,7 @@ LeadEngine Finder + Qualifier
 LeadEngine owns the workflow. Finders are replaceable data sources.
 
 Current finder: gosom/google-maps-scraper (open-source Docker image)
-Destination: Supabase broker_leads + scraper_runs
+Destination: Supabase broker_leads + scraper_runs via REST
 
 Manual example:
   SEARCH_REQUEST="dentists in Utah" python scraper.py
@@ -22,22 +22,19 @@ import tempfile
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
-from supabase import create_client, Client
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 SEARCH_REQUEST = (os.environ.get("SEARCH_REQUEST") or "").strip()
 FINDER_SOURCE = (os.environ.get("FINDER_SOURCE") or "gosom_gmaps").strip()
 
 HARD_CAP_LEADS = int(os.environ.get("HARD_CAP_LEADS", "20"))
-MAX_RETRIES = 3
-RETRY_BACKOFF_BASE = 2
 REQUEST_DELAY_MIN = 1
 REQUEST_DELAY_MAX = 3
 
-# Runs when no manual SEARCH_REQUEST is supplied.
 SAVED_SEARCHES = [
     "real estate brokers in Dubai UAE",
     "real estate agencies in Abu Dhabi UAE",
@@ -54,6 +51,33 @@ def validate_env():
         missing.append("SUPABASE_KEY")
     if missing:
         raise EnvironmentError(f"Missing required secrets: {', '.join(missing)}")
+
+
+def sb_headers(prefer=None):
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    return headers
+
+
+def sb_request(method, path, *, params=None, json=None, prefer=None):
+    response = requests.request(
+        method,
+        f"{SUPABASE_URL}/rest/v1/{path}",
+        headers=sb_headers(prefer),
+        params=params,
+        json=json,
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(f"Supabase {method} {path} failed {response.status_code}: {response.text[:500]}")
+    if not response.text:
+        return None
+    return response.json()
 
 
 def clean_phone(raw):
@@ -74,7 +98,6 @@ def is_whatsapp_likely(phone):
 
 
 def pick(row, *names):
-    """Return the first non-empty field, case-insensitively."""
     lowered = {str(k).lower(): v for k, v in row.items()}
     for name in names:
         value = lowered.get(name.lower())
@@ -84,7 +107,6 @@ def pick(row, *names):
 
 
 def run_gosom_google_maps(search_request, limit=20):
-    """Run the open-source Google Maps scraper as one replaceable finder."""
     print(f"\nFINDER [gosom_gmaps] → {search_request}")
 
     with tempfile.TemporaryDirectory(prefix="leadengine_") as tmp:
@@ -117,7 +139,6 @@ def run_gosom_google_maps(search_request, limit=20):
         with output.open("r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Flexible mapping protects us from harmless upstream column naming changes.
                 rows.append({
                     "name": pick(row, "title", "name"),
                     "phone": pick(row, "phone", "telephone"),
@@ -136,10 +157,6 @@ def run_gosom_google_maps(search_request, limit=20):
 
 
 def find_businesses(search_request, limit=20):
-    """
-    Single LeadEngine finder interface.
-    Add future sources here without changing scoring/database/dashboard code.
-    """
     if FINDER_SOURCE == "gosom_gmaps":
         return run_gosom_google_maps(search_request, limit)
     raise ValueError(f"Unknown FINDER_SOURCE: {FINDER_SOURCE}")
@@ -246,44 +263,55 @@ def process_result(raw, search_request):
     return lead
 
 
-def start_run(supabase: Client):
-    result = supabase.table("scraper_runs").insert({
-        "status": "running",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-    }).execute()
-    return result.data[0]["run_id"]
+def start_run():
+    data = sb_request(
+        "POST",
+        "scraper_runs",
+        json={"status": "running", "started_at": datetime.now(timezone.utc).isoformat()},
+        prefer="return=representation",
+    )
+    return data[0]["run_id"]
 
 
-def finish_run(supabase: Client, run_id, stats, errors):
+def finish_run(run_id, stats, errors):
     if not run_id:
         return
     status = "success" if stats["leads_inserted"] > 0 and not errors else (
         "partial" if stats["leads_inserted"] > 0 else "fail"
     )
-    supabase.table("scraper_runs").update({
-        "finished_at": datetime.now(timezone.utc).isoformat(),
-        "leads_fetched": stats["leads_fetched"],
-        "leads_inserted": stats["leads_inserted"],
-        "leads_skipped": stats["leads_skipped"],
-        "duplicates_skipped": stats["duplicates_skipped"],
-        "error_log": "\n".join(errors) if errors else None,
-        "status": status,
-    }).eq("run_id", run_id).execute()
+    sb_request(
+        "PATCH",
+        "scraper_runs",
+        params={"run_id": f"eq.{run_id}"},
+        json={
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "leads_fetched": stats["leads_fetched"],
+            "leads_inserted": stats["leads_inserted"],
+            "leads_skipped": stats["leads_skipped"],
+            "duplicates_skipped": stats["duplicates_skipped"],
+            "error_log": "\n".join(errors) if errors else None,
+            "status": status,
+        },
+    )
 
 
-def insert_lead(supabase: Client, lead):
-    """Returns True for a newly accepted row; False for an existing phone."""
-    existing = supabase.table("broker_leads").select("id").eq("phone_number", lead["phone_number"]).limit(1).execute()
-    if existing.data:
+def insert_lead(lead):
+    existing = sb_request(
+        "GET",
+        "broker_leads",
+        params={"select": "id", "phone_number": f"eq.{lead['phone_number']}", "limit": "1"},
+    )
+    if existing:
         return False
-    supabase.table("broker_leads").insert(lead).execute()
+    sb_request("POST", "broker_leads", json=lead)
     return True
 
 
 def main():
     validate_env()
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    run_id = start_run(supabase)
+    # Connectivity check before any scraping cost/time.
+    sb_request("GET", "broker_leads", params={"select": "id", "limit": "1"})
+    run_id = start_run()
     searches = [SEARCH_REQUEST] if SEARCH_REQUEST else SAVED_SEARCHES
 
     stats = {"leads_fetched": 0, "leads_inserted": 0, "leads_skipped": 0, "duplicates_skipped": 0}
@@ -315,7 +343,7 @@ def main():
                     if not lead:
                         stats["leads_skipped"] += 1
                         continue
-                    if insert_lead(supabase, lead):
+                    if insert_lead(lead):
                         stats["leads_inserted"] += 1
                         print(f"ADDED {lead['full_name']} | score {lead['pain_score']}")
                     else:
@@ -325,7 +353,7 @@ def main():
                     errors.append(f"Lead processing failed: {exc}")
                 time.sleep(random.uniform(REQUEST_DELAY_MIN, REQUEST_DELAY_MAX))
     finally:
-        finish_run(supabase, run_id, stats, errors)
+        finish_run(run_id, stats, errors)
         print(f"DONE: {stats} | errors={len(errors)}")
 
 
