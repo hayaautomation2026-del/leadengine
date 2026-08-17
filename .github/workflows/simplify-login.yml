@@ -1,0 +1,33 @@
+name: Simplify LeadEngine Login
+
+on:
+  push:
+    paths:
+      - '.github/workflows/simplify-login.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make login password-only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('android-native/app/src/main/java/com/hayaautomation/leadengine/MainActivity.kt')
+          s = p.read_text()
+          s = s.replace('''                Text("OWNER SIGN-IN", color = Muted, fontSize = 11.sp)\n                Spacer(Modifier.height(18.dp))\n                OutlinedTextField(value = OWNER_EMAIL, onValueChange = {}, readOnly = true, label = { Text("Owner") }, modifier = Modifier.fillMaxWidth())\n                Spacer(Modifier.height(10.dp))\n''', '''                Text("PRIVATE ACCESS", color = Muted, fontSize = 11.sp)\n                Spacer(Modifier.height(18.dp))\n''')
+          s = s.replace('label = { Text("Password") }', 'label = { Text("Your password") }', 1)
+          s = s.replace('Text("Unlock LeadEngine", fontWeight = FontWeight.Black)', 'Text("Open LeadEngine", fontWeight = FontWeight.Black)', 1)
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "LeadEngine Builder"
+          git config user.email "actions@users.noreply.github.com"
+          git add android-native/app/src/main/java/com/hayaautomation/leadengine/MainActivity.kt
+          git commit -m "Make owner login password-only"
+          git push
