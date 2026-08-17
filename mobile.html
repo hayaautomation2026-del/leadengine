@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="theme-color" content="#0a0a0f">
+<title>LeadEngine Mobile</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0a0a0f;color:#eee;font-family:system-ui,-apple-system,Segoe UI,sans-serif}main{max-width:680px;margin:auto;padding:18px}.card{background:#14141c;border:1px solid #262636;border-radius:16px;padding:16px;margin-bottom:14px}h1{margin:0 0 4px;color:#00e5a0;font-size:24px}.sub{color:#818197;font-size:13px;margin-bottom:18px}label{display:block;color:#9090a4;font-size:12px;margin:10px 0 6px}input,button{width:100%;border-radius:12px;padding:13px 14px;font-size:16px}input{background:#0d0d14;color:#fff;border:1px solid #2b2b3b;outline:none}input:focus{border-color:#00e5a0}button{border:0;background:#00e5a0;color:#07110d;font-weight:800;margin-top:12px;cursor:pointer}.secondary{background:#222231;color:#ddd}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.status{font-size:13px;color:#a3a3b5;margin-top:10px;line-height:1.4}.lead{padding:13px 0;border-top:1px solid #262636}.lead:first-child{border-top:0}.name{font-weight:800}.meta{font-size:12px;color:#8c8ca0;margin-top:4px}.score{float:right;color:#ffb000;font-weight:800}.empty{color:#77778d;font-size:14px;padding:10px 0}.hidden{display:none}.tiny{font-size:11px;color:#68687b}.good{color:#00e5a0}.bad{color:#ff6b6b}
+</style>
+</head>
+<body>
+<main>
+  <h1>LeadEngine</h1>
+  <div class="sub">Search → Supabase brain → finder → qualified leads</div>
+
+  <section id="setup" class="card hidden">
+    <b>Connect once</b>
+    <label>Supabase anon key</label>
+    <input id="anonKey" type="password" placeholder="eyJ...">
+    <button onclick="saveKey()">Save & Connect</button>
+    <div class="tiny" style="margin-top:10px">Project URL is already locked to the LeadEngine Supabase project.</div>
+  </section>
+
+  <section id="searchCard" class="card hidden">
+    <b>Find leads</b>
+    <label>What?</label>
+    <input id="query" placeholder="Dentists">
+    <label>Where?</label>
+    <input id="location" placeholder="Utah">
+    <div class="row">
+      <button onclick="runSearch()">Find Leads</button>
+      <button class="secondary" onclick="saveSearch()">Run While I Sleep</button>
+    </div>
+    <div id="jobStatus" class="status"></div>
+  </section>
+
+  <section id="leadsCard" class="card hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center"><b>Lead Queue</b><button class="secondary" style="width:auto;margin:0;padding:8px 12px;font-size:13px" onclick="loadLeads()">Refresh</button></div>
+    <div id="leads"></div>
+  </section>
+</main>
+<script>
+const PROJECT_URL='https://jequjltbvofmhfnbsfzt.supabase.co';
+const KEY_NAME='leadengine_anon_key';
+let key=localStorage.getItem(KEY_NAME)||'';
+let pollTimer=null;
+
+function boot(){
+  if(!key){document.getElementById('setup').classList.remove('hidden');return}
+  document.getElementById('searchCard').classList.remove('hidden');
+  document.getElementById('leadsCard').classList.remove('hidden');
+  loadLeads();
+}
+function saveKey(){
+  key=document.getElementById('anonKey').value.trim();
+  if(!key)return;
+  localStorage.setItem(KEY_NAME,key);
+  document.getElementById('setup').classList.add('hidden');
+  document.getElementById('searchCard').classList.remove('hidden');
+  document.getElementById('leadsCard').classList.remove('hidden');
+  loadLeads();
+}
+async function brain(payload){
+  const r=await fetch(`${PROJECT_URL}/functions/v1/leadengine-brain`,{method:'POST',headers:{'apikey':key,'Authorization':`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(data.error||`Request failed ${r.status}`);
+  return data;
+}
+async function runSearch(){
+  const query=document.getElementById('query').value.trim();
+  const location=document.getElementById('location').value.trim();
+  if(!query){setStatus('Enter what you want to find.','bad');return}
+  setStatus('Sending search to Supabase…');
+  try{
+    const data=await brain({action:'search',query,location,max_leads:20});
+    const id=data.request?.id;
+    setStatus(`Queued. Supabase request ${id?.slice(0,8)||''}…`,'good');
+    if(id)pollStatus(id);
+  }catch(e){setStatus(e.message,'bad')}
+}
+async function saveSearch(){
+  const query=document.getElementById('query').value.trim();
+  const location=document.getElementById('location').value.trim();
+  if(!query){setStatus('Enter what you want to find.','bad');return}
+  try{
+    await brain({action:'save_search',query,location,max_leads:20,interval_hours:24});
+    setStatus('Saved. Supabase will queue this search every 24 hours.','good');
+  }catch(e){setStatus(e.message,'bad')}
+}
+async function pollStatus(id){
+  clearTimeout(pollTimer);
+  try{
+    const data=await brain({action:'status',id});
+    const r=data.request;
+    if(!r){setStatus('Request not found.','bad');return}
+    if(r.status==='completed'){
+      setStatus(`Done. ${r.result_count||0} new leads added.`,'good');
+      loadLeads();return;
+    }
+    if(r.status==='failed'){
+      setStatus(`Finder failed: ${r.error_message||'unknown error'}`,'bad');return;
+    }
+    setStatus(r.status==='running'?'Finder is working…':'Waiting for finder…');
+    pollTimer=setTimeout(()=>pollStatus(id),8000);
+  }catch(e){setStatus(e.message,'bad')}
+}
+async function loadLeads(){
+  const box=document.getElementById('leads');
+  box.innerHTML='<div class="empty">Loading…</div>';
+  try{
+    const r=await fetch(`${PROJECT_URL}/rest/v1/broker_leads?select=id,full_name,agency_name,phone_number,city,country,pain_score,pain_reason,created_at&order=created_at.desc&limit=50`,{headers:{'apikey':key,'Authorization':`Bearer ${key}`}});
+    if(!r.ok)throw new Error(`Lead load failed ${r.status}`);
+    const rows=await r.json();
+    if(!rows.length){box.innerHTML='<div class="empty">No leads yet.</div>';return}
+    box.innerHTML=rows.map(x=>`<div class="lead"><span class="score">${x.pain_score??0}</span><div class="name">${esc(x.full_name||x.agency_name||'Unknown')}</div><div class="meta">${esc([x.city,x.country].filter(Boolean).join(' · '))}${x.phone_number?' · '+esc(x.phone_number):''}</div><div class="meta">${esc(x.pain_reason||'')}</div></div>`).join('');
+  }catch(e){box.innerHTML=`<div class="empty bad">${esc(e.message)}</div>`}
+}
+function setStatus(text,cls=''){const el=document.getElementById('jobStatus');el.className=`status ${cls}`;el.textContent=text}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+boot();
+</script>
+</body>
+</html>
