@@ -1,0 +1,44 @@
+name: Remove visible owner field
+
+on:
+  push:
+    paths:
+      - '.github/workflows/remove-owner-field.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove visible owner field
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('android-native/app/src/main/java/com/hayaautomation/leadengine/SecureLauncherActivity.kt')
+          s = p.read_text()
+          old = '''                        OutlinedTextField(
+                            value = LE_OWNER_EMAIL,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Owner") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(10.dp))
+'''
+          if old not in s:
+              raise SystemExit('owner field block not found')
+          s = s.replace(old, '')
+          s = s.replace('Text("Owner sign-in", color = LE_TEXT, fontWeight = FontWeight.Bold, fontSize = 20.sp)', 'Text("Unlock LeadEngine", color = LE_TEXT, fontWeight = FontWeight.Bold, fontSize = 20.sp)')
+          s = s.replace('Text("Sign in once, then create your private password.", color = LE_MUTED, fontSize = 11.sp)', 'Text("Enter your password.", color = LE_MUTED, fontSize = 11.sp)')
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "LeadEngine Builder"
+          git config user.email "actions@users.noreply.github.com"
+          git add android-native/app/src/main/java/com/hayaautomation/leadengine/SecureLauncherActivity.kt
+          git commit -m "Hide owner identity from app login"
+          git push
