@@ -1,8 +1,10 @@
 name: LeadEngine Finder
 
 on:
+  push:
+    branches: [main]
   schedule:
-    - cron: '0 3 * * 1'  # Monday 08:00 Pakistan time
+    - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
       search_request:
@@ -23,27 +25,22 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Install Python dependency
         run: pip install requests
-
       - name: Pull current open-source Maps finder
         run: docker pull gosom/google-maps-scraper:latest
-
       - name: Run LeadEngine finder
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          SEARCH_REQUEST: ${{ inputs.search_request }}
-          HARD_CAP_LEADS: ${{ inputs.hard_cap || '20' }}
+          SEARCH_REQUEST: ${{ github.event_name == 'push' && 'dentists in Utah' || inputs.search_request }}
+          HARD_CAP_LEADS: ${{ github.event_name == 'push' && '5' || inputs.hard_cap || '20' }}
           FINDER_SOURCE: gosom_gmaps
         run: python scraper.py
