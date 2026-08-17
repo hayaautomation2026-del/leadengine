@@ -1,1 +1,1 @@
-{"name":"LeadEngine","short_name":"LeadEngine","start_url":"/","scope":"/","display":"standalone","background_color":"#06100e","theme_color":"#07110f"}
+{"name":"LeadEngine","short_name":"LeadEngine","description":"Personal lead generation command center","start_url":"/","scope":"/","display":"standalone","background_color":"#06100e","theme_color":"#07110f","icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}
