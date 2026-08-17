@@ -1,18 +1,28 @@
-name: Weekly Broker Lead Scraper
+name: LeadEngine Finder
 
 on:
   schedule:
-    - cron: '0 3 * * 1'  # Every Monday at 3AM UTC (8AM PKT)
-  workflow_dispatch:      # Manual trigger from phone browser anytime
+    - cron: '0 3 * * 1'  # Monday 08:00 Pakistan time
+  workflow_dispatch:
+    inputs:
+      search_request:
+        description: 'What to find, e.g. dentists in Utah'
+        required: false
+        type: string
+      hard_cap:
+        description: 'Maximum leads to save this run'
+        required: false
+        default: '20'
+        type: string
 
 concurrency:
-  group: scraper
-  cancel-in-progress: true  # Kills old run if new one starts — no duplicates
+  group: leadengine-finder
+  cancel-in-progress: true
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 30   # Kill if hangs — protects free tier minutes
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -23,20 +33,17 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: pip install requests supabase==2.3.4
 
-      - name: Run scraper
+      - name: Pull current open-source Maps finder
+        run: docker pull gosom/google-maps-scraper:latest
+
+      - name: Run LeadEngine finder
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}  # Service key for RLS bypass on writes
-          OUTSCRAPER_API_KEY: ${{ secrets.OUTSCRAPER_API_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SEARCH_REQUEST: ${{ inputs.search_request }}
+          HARD_CAP_LEADS: ${{ inputs.hard_cap || '20' }}
+          FINDER_SOURCE: gosom_gmaps
         run: python scraper.py
-
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scraper-logs
-          path: "*.log"
-          retention-days: 7
