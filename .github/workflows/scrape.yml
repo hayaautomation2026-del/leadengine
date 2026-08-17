@@ -1,6 +1,8 @@
 name: LeadEngine Finder
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: '0 3 * * 1'
   workflow_dispatch:
@@ -26,6 +28,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Verify Supabase project
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        run: |
+          if [[ "$SUPABASE_URL" == *"jequjltbvofmhfnbsfzt"* ]]; then
+            echo "SUPABASE_PROJECT_MATCH=YES"
+          else
+            echo "SUPABASE_PROJECT_MATCH=NO"
+            exit 42
+          fi
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -38,7 +50,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          SEARCH_REQUEST: ${{ inputs.search_request }}
-          HARD_CAP_LEADS: ${{ inputs.hard_cap || '20' }}
+          SEARCH_REQUEST: dentists in Utah
+          HARD_CAP_LEADS: '5'
           FINDER_SOURCE: gosom_gmaps
         run: python scraper.py
