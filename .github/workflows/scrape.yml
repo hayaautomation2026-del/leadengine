@@ -1,6 +1,11 @@
 name: LeadEngine Finder Worker
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/scrape.yml'
+      - 'scraper.py'
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
