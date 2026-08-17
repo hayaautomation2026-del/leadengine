@@ -6,7 +6,7 @@
         android:label="LeadEngine"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
-            android:name=".SecureLauncherActivity"
+            android:name=".FastLauncherActivity"
             android:exported="true"
             android:screenOrientation="unspecified">
             <intent-filter>
