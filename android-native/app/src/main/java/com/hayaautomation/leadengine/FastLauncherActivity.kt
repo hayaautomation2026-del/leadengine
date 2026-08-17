@@ -65,7 +65,6 @@ private fun FastLogin(done: () -> Unit) {
     val panel = Color(0xFF0D1C18)
     val green = Color(0xFF48FFA2)
     val text = Color(0xFFF4FFF9)
-    val muted = Color(0xFF829E94)
     val red = Color(0xFFFF5F7D)
 
     MaterialTheme(colorScheme = darkColorScheme(background = bg, surface = panel, primary = green)) {
@@ -77,14 +76,13 @@ private fun FastLogin(done: () -> Unit) {
             ) {
                 Column(Modifier.padding(20.dp)) {
                     Text("⚡ LeadEngine", color = green, fontWeight = FontWeight.Black, fontSize = 28.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Enter password", color = text, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    Text("No user ID. No email. Just your password.", color = muted, fontSize = 11.sp)
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
+                    Text("Password", color = text, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = password,
                         onValueChange = { password = it; error = null },
-                        label = { Text("Password") },
+                        label = { Text("Enter password") },
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         singleLine = true,
@@ -112,7 +110,7 @@ private fun FastLogin(done: () -> Unit) {
                         modifier = Modifier.fillMaxWidth().height(54.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = green, contentColor = bg)
                     ) {
-                        Text(if (busy) "Opening…" else "Open LeadEngine", fontWeight = FontWeight.Black)
+                        Text(if (busy) "Opening…" else "Open", fontWeight = FontWeight.Black)
                     }
                 }
             }
@@ -124,8 +122,8 @@ private object FastAuth {
     suspend fun login(password: String): String = withContext(Dispatchers.IO) {
         val conn = (URL("$FAST_URL/auth/v1/token?grant_type=password").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 12000
-            readTimeout = 20000
+            connectTimeout = 8000
+            readTimeout = 12000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("apikey", FAST_KEY)
