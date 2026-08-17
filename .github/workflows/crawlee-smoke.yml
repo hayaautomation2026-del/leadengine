@@ -1,0 +1,29 @@
+name: Crawlee Maps Smoke Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/crawlee-smoke.yml'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Crawlee and Playwright
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests 'crawlee[playwright]'
+          playwright install chromium --with-deps
+      - name: Run Crawlee-only queue test
+        env:
+          SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FINDER_SOURCE: crawlee_maps
+          HARD_CAP_LEADS: '2'
+        run: python scraper.py
