@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from datetime import timedelta
 from urllib.parse import quote_plus
 
 
@@ -62,7 +63,6 @@ async def _first_text(page, selectors: list[str]) -> str | None:
 
 
 async def _accept_consent_if_present(page) -> None:
-    # Google wording can vary by locale. These are best-effort only.
     for pattern in (r"accept all", r"accept", r"agree", r"i agree"):
         try:
             button = page.get_by_role("button", name=re.compile(pattern, re.I)).first
@@ -94,7 +94,6 @@ async def _collect_place_urls(page, limit: int) -> list[str]:
     urls: list[str] = []
     seen: set[str] = set()
 
-    # Search-result links expose /maps/place/ URLs. Avoid brittle class names.
     for _ in range(12):
         await _detect_block(page)
         links = page.locator('a[href*="/maps/place/"]')
@@ -108,7 +107,6 @@ async def _collect_place_urls(page, limit: int) -> list[str]:
             if len(urls) >= limit:
                 return urls
 
-        # Prefer the semantic feed when present; fall back to wheel scrolling.
         try:
             feed = page.get_by_role("feed").first
             if await feed.count():
@@ -161,7 +159,6 @@ async def _extract_detail(page, maps_url: str) -> dict | None:
         "href",
     )
 
-    # V1 usability contract: no phone or no address = not a usable lead.
     if not name or not phone or not address:
         return None
 
@@ -187,7 +184,7 @@ async def _scrape(query: str, limit: int) -> list[dict]:
         headless=True,
         max_requests_per_crawl=1,
         max_request_retries=1,
-        request_handler_timeout=180,
+        request_handler_timeout=timedelta(seconds=180),
     )
 
     @crawler.router.default_handler
@@ -202,8 +199,6 @@ async def _scrape(query: str, limit: int) -> list[dict]:
         diagnostics["place_urls"] = len(place_urls)
 
         if not place_urls:
-            # A loaded Maps search with zero listing links is much more likely
-            # to be selector/UI drift or a challenge page than a valid success.
             raise SelectorDriftError("selector_drift:no_place_links_found")
 
         for url in place_urls:
@@ -240,5 +235,4 @@ async def _scrape(query: str, limit: int) -> list[dict]:
 
 
 def run_crawlee_google_maps(query: str, limit: int = 20) -> list[dict]:
-    """Synchronous entry point used by the LeadEngine worker."""
     return asyncio.run(_scrape(query, limit))
