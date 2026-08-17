@@ -154,10 +154,7 @@ async def _extract_detail(page, maps_url: str) -> dict | None:
 
     website = await _first_attr(
         page,
-        [
-            'a[data-item-id="authority"]',
-            'a[aria-label^="Website:"]',
-        ],
+        ['a[data-item-id="authority"]', 'a[aria-label^="Website:"]'],
         "href",
     )
 
@@ -175,20 +172,32 @@ async def _extract_detail(page, maps_url: str) -> dict | None:
 
 async def _scrape(query: str, limit: int) -> list[dict]:
     try:
-        from crawlee.crawlers import PlaywrightCrawler, PlaywrightCrawlingContext
+        from crawlee.crawlers import BasicCrawlingContext, PlaywrightCrawler, PlaywrightCrawlingContext
     except Exception as exc:
         raise RuntimeError("crawlee_playwright_not_installed") from exc
 
     results: list[dict] = []
-    diagnostics = {"search_page_loaded": False, "place_urls": 0, "detail_pages": 0}
+    diagnostics = {
+        "search_page_loaded": False,
+        "place_urls": 0,
+        "detail_pages": 0,
+        "failed_error": None,
+    }
 
     crawler = PlaywrightCrawler(
+        browser_type="chromium",
         headless=True,
         max_requests_per_crawl=1,
         max_request_retries=1,
+        navigation_timeout=timedelta(seconds=45),
         request_handler_timeout=timedelta(seconds=180),
-        abort_on_error=True,
+        retry_on_blocked=True,
     )
+
+    @crawler.failed_request_handler
+    async def failed_handler(context: BasicCrawlingContext, error: Exception) -> None:
+        diagnostics["failed_error"] = f"{type(error).__name__}: {error}"[:1500]
+        context.log.error(f"LeadEngine Crawlee request failed: {diagnostics['failed_error']}")
 
     @crawler.router.default_handler
     async def handler(context: PlaywrightCrawlingContext) -> None:
@@ -230,6 +239,8 @@ async def _scrape(query: str, limit: int) -> list[dict]:
     await crawler.run([search_url])
 
     if not results:
+        if diagnostics["failed_error"]:
+            raise RuntimeError(f"crawlee_request_failed:{diagnostics['failed_error']}")
         raise SelectorDriftError(
             f"selector_drift:loaded={diagnostics['search_page_loaded']},"
             f"place_links={diagnostics['place_urls']},detail_pages={diagnostics['detail_pages']}"
