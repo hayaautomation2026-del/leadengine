@@ -1,0 +1,16 @@
+{
+  "name": "leadengine-mobile",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "android:add": "npx cap add android",
+    "android:sync": "npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0"
+  }
+}
