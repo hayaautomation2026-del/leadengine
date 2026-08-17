@@ -1,8 +1,8 @@
-"""LeadEngine finder + qualifier.
+"""LeadEngine replaceable finder worker.
 
-LeadEngine owns the workflow; finder sources are replaceable.
-Current source: gosom/google-maps-scraper Docker image.
-Supabase access uses thin API views so the storage tables can stay behind RLS.
+Supabase owns orchestration and queue state.
+This worker only claims one pending search request, runs the configured finder,
+normalizes/scores results, saves leads, and reports completion back to Supabase.
 """
 
 import csv
@@ -24,15 +24,13 @@ SEARCH_REQUEST = (os.environ.get("SEARCH_REQUEST") or "").strip()
 FINDER_SOURCE = (os.environ.get("FINDER_SOURCE") or "gosom_gmaps").strip()
 HARD_CAP_LEADS = int(os.environ.get("HARD_CAP_LEADS", "20"))
 
-LEADS_ENDPOINT = "broker_leads_api"
-RUNS_ENDPOINT = "scraper_runs_api"
+LEADS_ENDPOINT = "broker_leads"
+RUNS_ENDPOINT = "scraper_runs"
+REQUESTS_ENDPOINT = "search_requests"
 
-SAVED_SEARCHES = [
-    "real estate brokers in Dubai UAE",
-    "real estate agencies in Abu Dhabi UAE",
-    "real estate brokers in Miami Florida USA",
-    "real estate brokers in Houston Texas USA",
-]
+
+def utcnow():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def validate_env():
@@ -66,8 +64,51 @@ def sb_request(method, path, *, params=None, json=None, prefer=None):
         timeout=30,
     )
     if not response.ok:
-        raise RuntimeError(f"Supabase {method} {path} failed {response.status_code}: {response.text[:500]}")
+        raise RuntimeError(
+            f"Supabase {method} {path} failed {response.status_code}: {response.text[:500]}"
+        )
     return response.json() if response.text else None
+
+
+def claim_pending_request():
+    rows = sb_request(
+        "GET",
+        REQUESTS_ENDPOINT,
+        params={
+            "select": "id,query,location,max_leads",
+            "status": "eq.pending",
+            "order": "created_at.asc",
+            "limit": "1",
+        },
+    ) or []
+    if not rows:
+        return None
+
+    request = rows[0]
+    updated = sb_request(
+        "PATCH",
+        REQUESTS_ENDPOINT,
+        params={"id": f"eq.{request['id']}", "status": "eq.pending"},
+        json={"status": "running", "started_at": utcnow(), "source_used": FINDER_SOURCE},
+        prefer="return=representation",
+    ) or []
+    return updated[0] if updated else None
+
+
+def complete_request(request_id, result_count, error=None):
+    status = "failed" if error else "completed"
+    sb_request(
+        "PATCH",
+        REQUESTS_ENDPOINT,
+        params={"id": f"eq.{request_id}"},
+        json={
+            "status": status,
+            "finished_at": utcnow(),
+            "result_count": result_count,
+            "error_message": str(error)[:2000] if error else None,
+            "source_used": FINDER_SOURCE,
+        },
+    )
 
 
 def clean_phone(raw):
@@ -153,9 +194,15 @@ def check_website(url):
     if not url:
         return result
     try:
-        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0 LeadEngine/1.0"}, timeout=8)
+        response = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 LeadEngine/1.0"},
+            timeout=8,
+        )
         html = response.text.lower()[:1_500_000]
-        result["has_website_chatbot"] = any(s in html for s in ["intercom", "drift", "tidio", "crisp", "zendesk", "freshchat", "tawk.to", "chatbot", "live chat"])
+        result["has_website_chatbot"] = any(
+            s in html for s in ["intercom", "drift", "tidio", "crisp", "zendesk", "freshchat", "tawk.to", "chatbot", "live chat"]
+        )
         result["has_whatsapp_button"] = any(s in html for s in ["wa.me", "whatsapp", "api.whatsapp"])
         result["has_inquiry_form"] = any(s in html for s in ["contact-form", "inquiry-form", "enquiry", "<form", "contact us"])
         result["has_afterhours_contact"] = any(s in html for s in ["after hours", "24/7", "available anytime", "after-hours", "emergency contact"])
@@ -176,7 +223,10 @@ def calculate_pain_score(lead):
     if lead.get("has_inquiry_form"):
         score -= 10
         reasons.append("Inquiry form present")
-    channels = sum(bool(lead.get(k)) for k in ["has_whatsapp_button", "has_inquiry_form", "has_afterhours_contact", "has_website_chatbot"])
+    channels = sum(
+        bool(lead.get(k))
+        for k in ["has_whatsapp_button", "has_inquiry_form", "has_afterhours_contact", "has_website_chatbot"]
+    )
     if channels >= 2:
         score -= 15
         reasons.append("Multiple contact channels")
@@ -212,7 +262,7 @@ def process_result(raw, search_request):
         "source_url": raw.get("url") or None,
         "contact_status": "new",
         "outreach_status": "pending",
-        "last_checked_at": datetime.now(timezone.utc).isoformat(),
+        "last_checked_at": utcnow(),
         "followup_due_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
         "notes": f"Search: {search_request}"[:1000],
         **check_website(website),
@@ -224,27 +274,43 @@ def process_result(raw, search_request):
 
 
 def start_run():
-    data = sb_request("POST", RUNS_ENDPOINT, json={"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}, prefer="return=representation")
+    data = sb_request(
+        "POST",
+        RUNS_ENDPOINT,
+        json={"status": "running", "started_at": utcnow()},
+        prefer="return=representation",
+    )
     return data[0]["run_id"]
 
 
 def finish_run(run_id, stats, errors):
     if not run_id:
         return
-    status = "success" if stats["leads_inserted"] > 0 and not errors else ("partial" if stats["leads_inserted"] > 0 else "fail")
-    sb_request("PATCH", RUNS_ENDPOINT, params={"run_id": f"eq.{run_id}"}, json={
-        "finished_at": datetime.now(timezone.utc).isoformat(),
-        "leads_fetched": stats["leads_fetched"],
-        "leads_inserted": stats["leads_inserted"],
-        "leads_skipped": stats["leads_skipped"],
-        "duplicates_skipped": stats["duplicates_skipped"],
-        "error_log": "\n".join(errors) if errors else None,
-        "status": status,
-    })
+    status = "success" if stats["leads_inserted"] > 0 and not errors else (
+        "partial" if stats["leads_inserted"] > 0 else "fail"
+    )
+    sb_request(
+        "PATCH",
+        RUNS_ENDPOINT,
+        params={"run_id": f"eq.{run_id}"},
+        json={
+            "finished_at": utcnow(),
+            "leads_fetched": stats["leads_fetched"],
+            "leads_inserted": stats["leads_inserted"],
+            "leads_skipped": stats["leads_skipped"],
+            "duplicates_skipped": stats["duplicates_skipped"],
+            "error_log": "\n".join(errors) if errors else None,
+            "status": status,
+        },
+    )
 
 
 def insert_lead(lead):
-    existing = sb_request("GET", LEADS_ENDPOINT, params={"select": "id", "phone_number": f"eq.{lead['phone_number']}", "limit": "1"})
+    existing = sb_request(
+        "GET",
+        LEADS_ENDPOINT,
+        params={"select": "id", "phone_number": f"eq.{lead['phone_number']}", "limit": "1"},
+    )
     if existing:
         return False
     sb_request("POST", LEADS_ENDPOINT, json=lead)
@@ -253,43 +319,57 @@ def insert_lead(lead):
 
 def main():
     validate_env()
-    sb_request("GET", LEADS_ENDPOINT, params={"select": "id", "limit": "1"})
+
+    request_id = None
+    if SEARCH_REQUEST:
+        search_request = SEARCH_REQUEST
+        hard_cap = HARD_CAP_LEADS
+    else:
+        request = claim_pending_request()
+        if not request:
+            print("NO PENDING SEARCH REQUESTS")
+            return
+        request_id = request["id"]
+        search_request = request["query"]
+        if request.get("location"):
+            search_request = f"{search_request} in {request['location']}"
+        hard_cap = int(request.get("max_leads") or HARD_CAP_LEADS)
+
     run_id = start_run()
-    searches = [SEARCH_REQUEST] if SEARCH_REQUEST else SAVED_SEARCHES
     stats = {"leads_fetched": 0, "leads_inserted": 0, "leads_skipped": 0, "duplicates_skipped": 0}
     errors = []
 
-    print(f"LEADENGINE FINDER | source={FINDER_SOURCE} | cap={HARD_CAP_LEADS}")
+    print(f"LEADENGINE FINDER | request={request_id or 'manual'} | source={FINDER_SOURCE} | cap={hard_cap}")
     try:
-        for search_request in searches:
-            if stats["leads_inserted"] >= HARD_CAP_LEADS:
+        raw_results = find_businesses(search_request, hard_cap)
+        for raw in raw_results:
+            if stats["leads_inserted"] >= hard_cap:
                 break
+            stats["leads_fetched"] += 1
             try:
-                raw_results = find_businesses(search_request, HARD_CAP_LEADS)
-            except Exception as exc:
-                errors.append(f"Finder failed for '{search_request}': {exc}")
-                continue
-
-            for raw in raw_results:
-                if stats["leads_inserted"] >= HARD_CAP_LEADS:
-                    break
-                stats["leads_fetched"] += 1
-                try:
-                    lead = process_result(raw, search_request)
-                    if not lead:
-                        stats["leads_skipped"] += 1
-                        continue
-                    if insert_lead(lead):
-                        stats["leads_inserted"] += 1
-                        print(f"ADDED {lead['full_name']} | score={lead['pain_score']}")
-                    else:
-                        stats["duplicates_skipped"] += 1
-                except Exception as exc:
+                lead = process_result(raw, search_request)
+                if not lead:
                     stats["leads_skipped"] += 1
-                    errors.append(f"Lead processing failed: {exc}")
-                time.sleep(random.uniform(1, 3))
+                    continue
+                if insert_lead(lead):
+                    stats["leads_inserted"] += 1
+                    print(f"ADDED {lead['full_name']} | score={lead['pain_score']}")
+                else:
+                    stats["duplicates_skipped"] += 1
+            except Exception as exc:
+                stats["leads_skipped"] += 1
+                errors.append(f"Lead processing failed: {exc}")
+            time.sleep(random.uniform(1, 2))
+    except Exception as exc:
+        errors.append(f"Finder failed for '{search_request}': {exc}")
     finally:
         finish_run(run_id, stats, errors)
+        if request_id:
+            complete_request(
+                request_id,
+                stats["leads_inserted"],
+                error="\n".join(errors) if errors and stats["leads_inserted"] == 0 else None,
+            )
         print(f"DONE {stats} errors={len(errors)}")
 
 
