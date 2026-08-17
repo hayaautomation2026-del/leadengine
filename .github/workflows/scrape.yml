@@ -22,7 +22,7 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Check key and pending work
         id: preflight
@@ -32,48 +32,44 @@ jobs:
         run: |
           if [ -z "$SUPABASE_KEY" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Worker secret is missing; stopping safely."
             exit 0
           fi
-
           if [ -n "$DIRECT_REQUEST" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "Direct worker request supplied."
             exit 0
           fi
-
           response=$(curl --fail --silent --show-error \
             "https://jequjltbvofmhfnbsfzt.supabase.co/rest/v1/search_requests?status=eq.pending&select=id&order=created_at.asc&limit=1" \
             -H "apikey: $SUPABASE_KEY" \
             -H "Authorization: Bearer $SUPABASE_KEY") || {
               echo "run=false" >> "$GITHUB_OUTPUT"
-              echo "Supabase preflight failed; stopping safely."
               exit 0
             }
-
           if [ "$response" = "[]" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Queue empty. Skipping checkout, Python and Docker."
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "Pending LeadEngine work found."
           fi
 
       - name: Checkout code
         if: steps.preflight.outputs.run == 'true'
         uses: actions/checkout@v4
+
       - name: Set up Python
         if: steps.preflight.outputs.run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
       - name: Install Python dependency
         if: steps.preflight.outputs.run == 'true'
         run: pip install requests
+
       - name: Pull replaceable Maps finder
         if: steps.preflight.outputs.run == 'true'
         run: docker pull gosom/google-maps-scraper:latest
-      - name: Process one Supabase search request
+
+      - name: Process LeadEngine search queue
         if: steps.preflight.outputs.run == 'true'
         env:
           SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
@@ -81,4 +77,20 @@ jobs:
           SEARCH_REQUEST: ${{ inputs.search_request }}
           HARD_CAP_LEADS: ${{ inputs.hard_cap || '20' }}
           FINDER_SOURCE: gosom_gmaps
-        run: python scraper.py
+        run: |
+          if [ -n "$SEARCH_REQUEST" ]; then
+            python scraper.py
+            exit $?
+          fi
+          for i in $(seq 1 10); do
+            pending=$(curl --fail --silent --show-error \
+              "${SUPABASE_URL}/rest/v1/search_requests?status=eq.pending&select=id&order=created_at.asc&limit=1" \
+              -H "apikey: $SUPABASE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_KEY") || break
+            if [ "$pending" = "[]" ]; then
+              echo "Queue drained."
+              break
+            fi
+            echo "Processing queued search $i"
+            python scraper.py || true
+          done
