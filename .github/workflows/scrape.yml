@@ -1,8 +1,6 @@
 name: LeadEngine Finder
 
 on:
-  push:
-    branches: [main]
   schedule:
     - cron: '0 3 * * 1'
   workflow_dispatch:
@@ -40,7 +38,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          SEARCH_REQUEST: ${{ github.event_name == 'push' && 'dentists in Utah' || inputs.search_request }}
-          HARD_CAP_LEADS: ${{ github.event_name == 'push' && '5' || inputs.hard_cap || '20' }}
+          SEARCH_REQUEST: ${{ inputs.search_request }}
+          HARD_CAP_LEADS: ${{ inputs.hard_cap || '20' }}
           FINDER_SOURCE: gosom_gmaps
         run: python scraper.py
