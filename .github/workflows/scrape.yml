@@ -1,10 +1,6 @@
 name: LeadEngine Finder Worker
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/scrape.yml'
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
@@ -28,17 +24,39 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Check Supabase worker key
+        id: preflight
+        env:
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://jequjltbvofmhfnbsfzt.supabase.co/rest/v1/search_requests?select=id&limit=1" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY")
+          if [ "$code" = "200" ]; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+            echo "Supabase worker key is valid."
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "Supabase worker key is not configured for the LeadEngine project yet; worker will sleep."
+          fi
+
       - name: Checkout code
+        if: steps.preflight.outputs.valid == 'true'
         uses: actions/checkout@v4
       - name: Set up Python
+        if: steps.preflight.outputs.valid == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install Python dependency
+        if: steps.preflight.outputs.valid == 'true'
         run: pip install requests
       - name: Pull replaceable Maps finder
+        if: steps.preflight.outputs.valid == 'true'
         run: docker pull gosom/google-maps-scraper:latest
       - name: Process one Supabase search request
+        if: steps.preflight.outputs.valid == 'true'
         env:
           SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
