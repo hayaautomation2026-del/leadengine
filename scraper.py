@@ -1,8 +1,12 @@
-"""LeadEngine replaceable finder worker.
+"""LeadEngine free-first multi-scraper worker.
 
-Supabase owns orchestration and queue state.
-This worker only claims one pending search request, runs the configured finder,
-normalizes/scores results, saves leads, and reports completion back to Supabase.
+Router order:
+1) gosom Google Maps scraper (primary)
+2) Crawlee Python + Playwright Google Maps scraper (fallback)
+
+A scraper only counts as successful when it returns usable leads with at least
+name + phone + address. Empty/partial output is treated as failure so the router
+can fall back instead of silently reporting success.
 """
 
 import csv
@@ -21,7 +25,7 @@ import requests
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 SEARCH_REQUEST = (os.environ.get("SEARCH_REQUEST") or "").strip()
-FINDER_SOURCE = (os.environ.get("FINDER_SOURCE") or "gosom_gmaps").strip()
+FINDER_SOURCE = (os.environ.get("FINDER_SOURCE") or "auto").strip()
 HARD_CAP_LEADS = int(os.environ.get("HARD_CAP_LEADS", "20"))
 
 LEADS_ENDPOINT = "broker_leads"
@@ -89,13 +93,13 @@ def claim_pending_request():
         "PATCH",
         REQUESTS_ENDPOINT,
         params={"id": f"eq.{request['id']}", "status": "eq.pending"},
-        json={"status": "running", "started_at": utcnow(), "source_used": FINDER_SOURCE},
+        json={"status": "running", "started_at": utcnow()},
         prefer="return=representation",
     ) or []
     return updated[0] if updated else None
 
 
-def complete_request(request_id, result_count, error=None):
+def complete_request(request_id, result_count, engine_used=None, error=None):
     status = "failed" if error else "completed"
     sb_request(
         "PATCH",
@@ -106,7 +110,7 @@ def complete_request(request_id, result_count, error=None):
             "finished_at": utcnow(),
             "result_count": result_count,
             "error_message": str(error)[:2000] if error else None,
-            "source_used": FINDER_SOURCE,
+            "source_used": engine_used,
         },
     )
 
@@ -135,8 +139,33 @@ def pick(row, *names):
     return None
 
 
+def normalize_raw(row):
+    return {
+        "name": (row.get("name") or "").strip(),
+        "phone": clean_phone(row.get("phone")),
+        "site": (row.get("site") or row.get("website") or "").strip() or None,
+        "url": (row.get("url") or row.get("maps_url") or "").strip() or None,
+        "address": (row.get("address") or "").strip() or None,
+    }
+
+
+def usable_rows(rows):
+    cleaned = []
+    seen = set()
+    for raw in rows or []:
+        row = normalize_raw(raw)
+        if not row["name"] or not row["phone"] or not row["address"]:
+            continue
+        key = row["phone"]
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(row)
+    return cleaned
+
+
 def run_gosom_google_maps(search_request, limit=20):
-    print(f"FINDER [gosom_gmaps] -> {search_request}")
+    print(f"ENGINE ATTEMPT | gosom_gmaps | query={search_request}")
     with tempfile.TemporaryDirectory(prefix="leadengine_") as tmp:
         folder = Path(tmp)
         query_file = folder / "queries.txt"
@@ -158,9 +187,9 @@ def run_gosom_google_maps(search_request, limit=20):
         completed = subprocess.run(cmd, text=True, capture_output=True, timeout=420)
         if completed.returncode != 0:
             details = (completed.stderr or completed.stdout or "unknown scraper error")[-1500:]
-            raise RuntimeError(f"gosom finder failed: {details}")
+            raise RuntimeError(f"gosom_failed:{details}")
         if not output_file.exists():
-            raise RuntimeError("finder produced no results file")
+            raise RuntimeError("gosom_no_results_file")
 
         rows = []
         with output_file.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -172,16 +201,69 @@ def run_gosom_google_maps(search_request, limit=20):
                     "url": pick(row, "link", "google_maps_url", "url"),
                     "address": pick(row, "address", "complete_address"),
                 })
-                if len(rows) >= limit:
+                if len(rows) >= max(limit * 2, limit + 5):
                     break
-        print(f"FINDER returned {len(rows)} rows")
-        return rows
+
+        rows = usable_rows(rows)
+        if not rows:
+            raise RuntimeError("gosom_zero_usable_results_with_phone_and_address")
+        print(f"ENGINE SUCCESS | gosom_gmaps | usable={len(rows)}")
+        return rows[:limit]
+
+
+def run_crawlee_google_maps_adapter(search_request, limit=20):
+    print(f"ENGINE ATTEMPT | crawlee_maps | query={search_request}")
+    from crawlee_maps import run_crawlee_google_maps
+
+    rows = usable_rows(run_crawlee_google_maps(search_request, limit))
+    if not rows:
+        raise RuntimeError("crawlee_zero_usable_results_with_phone_and_address")
+    print(f"ENGINE SUCCESS | crawlee_maps | usable={len(rows)}")
+    return rows[:limit]
 
 
 def find_businesses(search_request, limit=20):
+    """Run the free-first router and return (rows, engine metadata)."""
     if FINDER_SOURCE == "gosom_gmaps":
-        return run_gosom_google_maps(search_request, limit)
-    raise ValueError(f"Unknown FINDER_SOURCE: {FINDER_SOURCE}")
+        rows = run_gosom_google_maps(search_request, limit)
+        return rows, {
+            "primary_engine": "gosom_gmaps",
+            "engine_used": "gosom_gmaps",
+            "fallback_triggered": False,
+            "fallback_reason": None,
+        }
+
+    if FINDER_SOURCE == "crawlee_maps":
+        rows = run_crawlee_google_maps_adapter(search_request, limit)
+        return rows, {
+            "primary_engine": "crawlee_maps",
+            "engine_used": "crawlee_maps",
+            "fallback_triggered": False,
+            "fallback_reason": None,
+        }
+
+    if FINDER_SOURCE != "auto":
+        raise ValueError(f"Unknown FINDER_SOURCE: {FINDER_SOURCE}")
+
+    try:
+        rows = run_gosom_google_maps(search_request, limit)
+        return rows, {
+            "primary_engine": "gosom_gmaps",
+            "engine_used": "gosom_gmaps",
+            "fallback_triggered": False,
+            "fallback_reason": None,
+        }
+    except Exception as exc:
+        reason = f"{type(exc).__name__}: {exc}"[:1000]
+        print(f"ENGINE FAILED | gosom_gmaps | {reason}")
+        print("FALLBACK TRIGGERED | gosom_gmaps -> crawlee_maps")
+        rows = run_crawlee_google_maps_adapter(search_request, limit)
+        return rows, {
+            "primary_engine": "gosom_gmaps",
+            "engine_used": "crawlee_maps",
+            "fallback_triggered": True,
+            "fallback_reason": reason,
+        }
 
 
 def check_website(url):
@@ -244,10 +326,11 @@ def make_fingerprint(lead):
     return hashlib.md5(raw.encode()).hexdigest()[:16]
 
 
-def process_result(raw, search_request):
+def process_result(raw, search_request, engine_used):
     phone = clean_phone(raw.get("phone"))
     name = (raw.get("name") or "").strip()[:150]
-    if not phone or len(name) < 2:
+    address = (raw.get("address") or "").strip()[:500]
+    if not phone or len(name) < 2 or not address:
         return None
 
     website = (raw.get("site") or "").strip()
@@ -258,7 +341,8 @@ def process_result(raw, search_request):
         "whatsapp_number": phone if is_whatsapp_likely(phone) else None,
         "website_url": website or None,
         "google_maps_url": raw.get("url") or None,
-        "source": FINDER_SOURCE,
+        "address": address,
+        "source": engine_used,
         "source_url": raw.get("url") or None,
         "contact_status": "new",
         "outreach_status": "pending",
@@ -273,17 +357,22 @@ def process_result(raw, search_request):
     return lead
 
 
-def start_run():
+def start_run(request_id=None):
     data = sb_request(
         "POST",
         RUNS_ENDPOINT,
-        json={"status": "running", "started_at": utcnow()},
+        json={
+            "status": "running",
+            "started_at": utcnow(),
+            "search_request_id": request_id,
+            "provider": "free_multi_scraper",
+        },
         prefer="return=representation",
     )
     return data[0]["run_id"]
 
 
-def finish_run(run_id, stats, errors):
+def finish_run(run_id, stats, errors, engine_meta):
     if not run_id:
         return
     status = "success" if stats["leads_inserted"] > 0 and not errors else (
@@ -301,6 +390,10 @@ def finish_run(run_id, stats, errors):
             "duplicates_skipped": stats["duplicates_skipped"],
             "error_log": "\n".join(errors) if errors else None,
             "status": status,
+            "primary_engine": engine_meta.get("primary_engine"),
+            "engine_used": engine_meta.get("engine_used"),
+            "fallback_triggered": bool(engine_meta.get("fallback_triggered")),
+            "fallback_reason": engine_meta.get("fallback_reason"),
         },
     )
 
@@ -335,42 +428,44 @@ def main():
             search_request = f"{search_request} in {request['location']}"
         hard_cap = int(request.get("max_leads") or HARD_CAP_LEADS)
 
-    run_id = start_run()
+    run_id = start_run(request_id)
     stats = {"leads_fetched": 0, "leads_inserted": 0, "leads_skipped": 0, "duplicates_skipped": 0}
     errors = []
+    engine_meta = {}
 
-    print(f"LEADENGINE FINDER | request={request_id or 'manual'} | source={FINDER_SOURCE} | cap={hard_cap}")
+    print(f"LEADENGINE FINDER | request={request_id or 'manual'} | router={FINDER_SOURCE} | cap={hard_cap}")
     try:
-        raw_results = find_businesses(search_request, hard_cap)
+        raw_results, engine_meta = find_businesses(search_request, hard_cap)
         for raw in raw_results:
             if stats["leads_inserted"] >= hard_cap:
                 break
             stats["leads_fetched"] += 1
             try:
-                lead = process_result(raw, search_request)
+                lead = process_result(raw, search_request, engine_meta.get("engine_used") or FINDER_SOURCE)
                 if not lead:
                     stats["leads_skipped"] += 1
                     continue
                 if insert_lead(lead):
                     stats["leads_inserted"] += 1
-                    print(f"ADDED {lead['full_name']} | score={lead['pain_score']}")
+                    print(f"ADDED {lead['full_name']} | {lead['phone_number']} | score={lead['pain_score']}")
                 else:
                     stats["duplicates_skipped"] += 1
             except Exception as exc:
                 stats["leads_skipped"] += 1
                 errors.append(f"Lead processing failed: {exc}")
-            time.sleep(random.uniform(1, 2))
+            time.sleep(random.uniform(0.7, 1.4))
     except Exception as exc:
-        errors.append(f"Finder failed for '{search_request}': {exc}")
+        errors.append(f"Finder failed for '{search_request}': {type(exc).__name__}: {exc}")
     finally:
-        finish_run(run_id, stats, errors)
+        finish_run(run_id, stats, errors, engine_meta)
         if request_id:
             complete_request(
                 request_id,
                 stats["leads_inserted"],
+                engine_used=engine_meta.get("engine_used"),
                 error="\n".join(errors) if errors and stats["leads_inserted"] == 0 else None,
             )
-        print(f"DONE {stats} errors={len(errors)}")
+        print(f"DONE {stats} engine={engine_meta.get('engine_used')} fallback={engine_meta.get('fallback_triggered')} errors={len(errors)}")
 
 
 if __name__ == "__main__":
