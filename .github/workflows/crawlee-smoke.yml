@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/crawlee-smoke.yml'
 
+# Smoke test revision 2
 jobs:
   smoke:
     runs-on: ubuntu-latest
