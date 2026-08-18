@@ -88,7 +88,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SEARCH_REQUEST: ${{ inputs.search_request }}
           HARD_CAP_LEADS: ${{ inputs.hard_cap || '20' }}
-          FINDER_SOURCE: crawlee_maps
+          FINDER_SOURCE: auto
         run: |
           if [ -n "$SEARCH_REQUEST" ]; then
             python scraper.py
