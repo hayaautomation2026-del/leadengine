@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import timedelta
-from urllib.parse import quote_plus
+from urllib.parse import quote
 
 
 class MapsBlockedError(RuntimeError):
@@ -236,10 +236,7 @@ async def _scrape(query: str, limit: int) -> list[dict]:
                 f"selector_drift:place_links={diagnostics['place_urls']},usable_details=0"
             )
 
-    search_url = (
-        "https://www.google.com/maps/search/?api=1&query="
-        f"{quote_plus(query)}&hl=en"
-    )
+    search_url = f"https://www.google.com/maps/search/{quote(query, safe='')}?hl=en"
     await crawler.run([search_url])
 
     if not results:
