@@ -6,7 +6,7 @@ on:
     paths:
       - '.github/workflows/crawlee-smoke.yml'
 
-# Smoke test revision 7 - direct Crawlee only, explicit city/country
+# Smoke test revision 8 - unique Karachi query
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -26,6 +26,6 @@ jobs:
           SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           FINDER_SOURCE: crawlee_maps
-          SEARCH_REQUEST: 'locksmiths in Saddar Karachi Pakistan'
+          SEARCH_REQUEST: 'pet groomers in Clifton Karachi Pakistan'
           HARD_CAP_LEADS: '2'
         run: python scraper.py
