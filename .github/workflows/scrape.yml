@@ -107,4 +107,4 @@ jobs:
             python scraper.py || true
           done
 
-# verification wake 2026-08-18
+# verification wake 2026-08-18 second pass
