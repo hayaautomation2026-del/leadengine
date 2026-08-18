@@ -49,7 +49,7 @@ class FastLauncherActivity : ComponentActivity() {
     }
 
     private fun openMain() {
-        startActivity(Intent(this, MainActivity::class.java))
+        startActivity(Intent(this, UsableMainActivity::class.java))
         finish()
     }
 }
