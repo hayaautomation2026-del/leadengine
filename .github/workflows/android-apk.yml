@@ -26,6 +26,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Record build started
+        working-directory: .
+        run: |
+          mkdir -p ci-reports
+          {
+            echo "RESULT=STARTED"
+            echo "COMMIT=${GITHUB_SHA}"
+            echo "STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > ci-reports/android-build.txt
+          git config user.name "leadengine-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add ci-reports/android-build.txt
+          git commit -m "Android build started ${GITHUB_SHA::7}" || true
+          git push || true
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -104,8 +119,8 @@ jobs:
           git config user.name "leadengine-ci"
           git config user.email "actions@users.noreply.github.com"
           git add ci-reports/android-build.txt
-          git commit -m "Record Android build verification ${GITHUB_SHA::7}" || exit 0
-          git push
+          git commit -m "Record Android build verification ${GITHUB_SHA::7}" || true
+          git push || true
 
       - name: Fail workflow if build failed
         if: steps.build.outputs.exit_code != '0'
