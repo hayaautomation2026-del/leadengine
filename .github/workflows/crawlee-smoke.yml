@@ -6,7 +6,7 @@ on:
     paths:
       - '.github/workflows/crawlee-smoke.yml'
 
-# Smoke test revision 4
+# Smoke test revision 5 - direct Crawlee only, no queue race
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -21,10 +21,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests 'crawlee[playwright]'
           playwright install chromium --with-deps
-      - name: Run Crawlee-only queue test
+      - name: Run isolated Crawlee-only test
         env:
           SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           FINDER_SOURCE: crawlee_maps
+          SEARCH_REQUEST: 'locksmiths in Saddar Karachi'
           HARD_CAP_LEADS: '2'
         run: python scraper.py
