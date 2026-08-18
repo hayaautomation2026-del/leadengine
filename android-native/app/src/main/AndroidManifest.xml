@@ -15,6 +15,10 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".UsableMainActivity"
+            android:exported="false"
+            android:screenOrientation="unspecified" />
+        <activity
             android:name=".MainActivity"
             android:exported="false"
             android:screenOrientation="unspecified" />
