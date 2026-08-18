@@ -6,7 +6,7 @@ on:
     paths:
       - '.github/workflows/crawlee-smoke.yml'
 
-# Smoke test revision 5 - direct Crawlee only, no queue race
+# Smoke test revision 6 - direct Crawlee only, no queue race
 jobs:
   smoke:
     runs-on: ubuntu-latest
