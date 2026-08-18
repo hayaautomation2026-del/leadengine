@@ -11,6 +11,7 @@ can fall back instead of silently reporting success.
 
 import csv
 import hashlib
+import json
 import os
 import random
 import re
@@ -139,13 +140,40 @@ def pick(row, *names):
     return None
 
 
+def clean_address(raw):
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        data = raw
+    else:
+        text = str(raw).strip()
+        if not text:
+            return None
+        data = None
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    data = parsed
+            except json.JSONDecodeError:
+                pass
+        if data is None:
+            return text[:500]
+    parts = []
+    for key in ("street", "borough", "city", "state", "postal_code", "country"):
+        value = str(data.get(key) or "").strip()
+        if value and value not in parts:
+            parts.append(value)
+    return ", ".join(parts)[:500] or None
+
+
 def normalize_raw(row):
     return {
         "name": (row.get("name") or "").strip(),
         "phone": clean_phone(row.get("phone")),
         "site": (row.get("site") or row.get("website") or "").strip() or None,
         "url": (row.get("url") or row.get("maps_url") or "").strip() or None,
-        "address": (row.get("address") or "").strip() or None,
+        "address": clean_address(row.get("address")),
     }
 
 
@@ -329,7 +357,7 @@ def make_fingerprint(lead):
 def process_result(raw, search_request, engine_used):
     phone = clean_phone(raw.get("phone"))
     name = (raw.get("name") or "").strip()[:150]
-    address = (raw.get("address") or "").strip()[:500]
+    address = clean_address(raw.get("address")) or ""
     if not phone or len(name) < 2 or not address:
         return None
 
