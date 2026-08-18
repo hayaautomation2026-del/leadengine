@@ -186,6 +186,10 @@ async def _scrape(query: str, limit: int) -> list[dict]:
 
     crawler = PlaywrightCrawler(
         browser_type="chromium",
+        browser_launch_options={
+            "chromium_sandbox": False,
+            "args": ["--no-sandbox", "--disable-setuid-sandbox"],
+        },
         headless=True,
         max_requests_per_crawl=1,
         max_request_retries=1,
