@@ -41,35 +41,56 @@ jobs:
           gradle-version: '9.4.1'
 
       - name: Build native debug APK
-        run: gradle :app:assembleDebug --stacktrace
-
-      - name: Verify APK exists and inspect manifest
+        id: build
         run: |
-          set -euo pipefail
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK"
-          SHA=$(sha256sum "$APK" | awk '{print $1}')
-          SIZE=$(stat -c%s "$APK")
-          AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort -V | tail -1)
-          test -n "$AAPT"
-          "$AAPT" dump xmltree "$APK" --file AndroidManifest.xml > /tmp/manifest.txt
-          grep -q 'com.hayaautomation.leadengine.FastLauncherActivity' /tmp/manifest.txt
-          grep -q 'com.hayaautomation.leadengine.UsableMainActivity' /tmp/manifest.txt
+          set +e
+          gradle :app:assembleDebug --stacktrace 2>&1 | tee /tmp/android-build.log
+          code=${PIPESTATUS[0]}
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Produce verification report
+        if: always()
+        run: |
           mkdir -p ../ci-reports
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          CODE="${{ steps.build.outputs.exit_code }}"
           {
-            echo "RESULT=PASS"
             echo "COMMIT=${GITHUB_SHA}"
-            echo "APK_SHA256=${SHA}"
-            echo "APK_BYTES=${SIZE}"
-            echo "LAUNCHER=FastLauncherActivity"
-            echo "RESULTS_SCREEN=UsableMainActivity"
+            echo "BUILD_EXIT_CODE=${CODE:-unknown}"
             echo "VERIFIED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } > ../ci-reports/android-build.txt
 
+          if [ "$CODE" = "0" ] && [ -s "$APK" ]; then
+            SHA=$(sha256sum "$APK" | awk '{print $1}')
+            SIZE=$(stat -c%s "$APK")
+            AAPT=$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort -V | tail -1)
+            if [ -n "$AAPT" ] && "$AAPT" dump xmltree "$APK" --file AndroidManifest.xml > /tmp/manifest.txt 2>&1 \
+              && grep -q 'com.hayaautomation.leadengine.FastLauncherActivity' /tmp/manifest.txt \
+              && grep -q 'com.hayaautomation.leadengine.UsableMainActivity' /tmp/manifest.txt; then
+              {
+                echo "RESULT=PASS"
+                echo "APK_SHA256=${SHA}"
+                echo "APK_BYTES=${SIZE}"
+                echo "LAUNCHER=FastLauncherActivity"
+                echo "RESULTS_SCREEN=UsableMainActivity"
+              } >> ../ci-reports/android-build.txt
+            else
+              echo "RESULT=FAIL_MANIFEST_CHECK" >> ../ci-reports/android-build.txt
+              tail -80 /tmp/manifest.txt >> ../ci-reports/android-build.txt 2>/dev/null || true
+            fi
+          else
+            echo "RESULT=FAIL_BUILD" >> ../ci-reports/android-build.txt
+            echo "---- BUILD LOG TAIL ----" >> ../ci-reports/android-build.txt
+            tail -120 /tmp/android-build.log >> ../ci-reports/android-build.txt 2>/dev/null || true
+          fi
+
       - name: Copy APK
+        if: steps.build.outputs.exit_code == '0'
         run: cp app/build/outputs/apk/debug/app-debug.apk ../LeadEngine-native-debug.apk
 
       - name: Upload APK
+        if: steps.build.outputs.exit_code == '0'
         uses: actions/upload-artifact@v4
         with:
           name: LeadEngine-Native-Android-APK
@@ -77,10 +98,15 @@ jobs:
           retention-days: 30
 
       - name: Commit verification report
+        if: always()
         working-directory: .
         run: |
           git config user.name "leadengine-ci"
           git config user.email "actions@users.noreply.github.com"
           git add ci-reports/android-build.txt
-          git commit -m "Record verified Android build ${GITHUB_SHA::7}" || exit 0
+          git commit -m "Record Android build verification ${GITHUB_SHA::7}" || exit 0
           git push
+
+      - name: Fail workflow if build failed
+        if: steps.build.outputs.exit_code != '0'
+        run: exit 1
