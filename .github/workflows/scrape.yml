@@ -6,13 +6,14 @@ on:
     paths:
       - '.github/workflows/scrape.yml'
       - 'scraper.py'
+      - 'niche_worker.py'
       - 'crawlee_maps.py'
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       search_request:
-        description: 'Optional direct test search'
+        description: 'Optional direct search request ID'
         required: false
         type: string
       hard_cap:
@@ -51,11 +52,7 @@ jobs:
               echo "run=false" >> "$GITHUB_OUTPUT"
               exit 0
             }
-          if [ "$response" = "[]" ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
+          if [ "$response" = "[]" ]; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: Checkout code
         if: steps.preflight.outputs.run == 'true'
@@ -81,7 +78,7 @@ jobs:
         if: steps.preflight.outputs.run == 'true'
         run: docker pull gosom/google-maps-scraper:latest
 
-      - name: Process LeadEngine search queue
+      - name: Process niche-aware LeadEngine queue
         if: steps.preflight.outputs.run == 'true'
         env:
           SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
@@ -91,7 +88,7 @@ jobs:
           FINDER_SOURCE: auto
         run: |
           if [ -n "$SEARCH_REQUEST" ]; then
-            python scraper.py
+            python niche_worker.py
             exit $?
           fi
           for i in $(seq 1 10); do
@@ -99,12 +96,7 @@ jobs:
               "${SUPABASE_URL}/rest/v1/search_requests?status=eq.pending&select=id&order=created_at.asc&limit=1" \
               -H "apikey: $SUPABASE_KEY" \
               -H "Authorization: Bearer $SUPABASE_KEY") || break
-            if [ "$pending" = "[]" ]; then
-              echo "Queue drained."
-              break
-            fi
-            echo "Processing queued search $i"
-            python scraper.py || true
+            if [ "$pending" = "[]" ]; then echo "Queue drained."; break; fi
+            echo "Processing queued niche search $i"
+            python niche_worker.py || true
           done
-
-# verification wake 2026-08-18 second pass
