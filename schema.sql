@@ -1,16 +1,27 @@
 -- ============================================================
 -- LEADENGINE CORE SCHEMA
--- Real-estate broker lead pipeline
+-- General business lead pipeline, categorized by niche.
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS public.broker_leads (
+CREATE TABLE IF NOT EXISTS public.niches (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    slug TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now())
+);
+
+CREATE TABLE IF NOT EXISTS public.leads (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()),
     updated_at TIMESTAMP WITH TIME ZONE,
 
+    -- Niche/category
+    niche_id UUID REFERENCES public.niches(id) ON DELETE SET NULL,
+
     -- Core identity
     full_name TEXT,
-    agency_name TEXT,
+    business_name TEXT,
     phone_number TEXT UNIQUE,
     whatsapp_number TEXT,
     website_url TEXT,
@@ -19,6 +30,7 @@ CREATE TABLE IF NOT EXISTS public.broker_leads (
     -- Location
     city TEXT,
     country TEXT,
+    address TEXT,
 
     -- Source tracking
     source TEXT,
@@ -41,7 +53,7 @@ CREATE TABLE IF NOT EXISTS public.broker_leads (
     followup_due_at TIMESTAMP WITH TIME ZONE,
     last_checked_at TIMESTAMP WITH TIME ZONE,
 
-    -- Deduplication
+    -- Deduplication / scoring
     lead_fingerprint TEXT,
     scoring_version TEXT DEFAULT 'v1',
 
@@ -58,61 +70,50 @@ CREATE TABLE IF NOT EXISTS public.scraper_runs (
     leads_skipped INTEGER DEFAULT 0,
     duplicates_skipped INTEGER DEFAULT 0,
     error_log TEXT,
-    status TEXT DEFAULT 'running'
+    status TEXT DEFAULT 'running',
+    niche_id UUID REFERENCES public.niches(id) ON DELETE SET NULL
 );
 
 -- ============================================================
 -- INDEXES
 -- ============================================================
-CREATE INDEX IF NOT EXISTS idx_leads_phone ON public.broker_leads(phone_number);
-CREATE INDEX IF NOT EXISTS idx_leads_pain_score ON public.broker_leads(pain_score DESC);
-CREATE INDEX IF NOT EXISTS idx_leads_status ON public.broker_leads(contact_status);
-CREATE INDEX IF NOT EXISTS idx_leads_city ON public.broker_leads(city);
-CREATE INDEX IF NOT EXISTS idx_leads_followup ON public.broker_leads(followup_due_at);
+CREATE INDEX IF NOT EXISTS idx_leads_niche ON public.leads(niche_id);
+CREATE INDEX IF NOT EXISTS idx_leads_phone ON public.leads(phone_number);
+CREATE INDEX IF NOT EXISTS idx_leads_pain_score ON public.leads(pain_score DESC);
+CREATE INDEX IF NOT EXISTS idx_leads_status ON public.leads(contact_status);
+CREATE INDEX IF NOT EXISTS idx_leads_city ON public.leads(city);
+CREATE INDEX IF NOT EXISTS idx_leads_followup ON public.leads(followup_due_at);
+CREATE INDEX IF NOT EXISTS idx_runs_niche ON public.scraper_runs(niche_id);
 
 -- ============================================================
 -- ROW LEVEL SECURITY
--- Dashboard may read lead/run data, but can only update the small
--- set of operator fields used by dashboard.html.
--- Scraper writes use service_role.
+-- Backend writes use service_role. Owner dashboard access is
+-- mediated through the authenticated Edge Function.
 -- ============================================================
-ALTER TABLE public.broker_leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.niches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.leads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.scraper_runs ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS anon_read_broker_leads ON public.broker_leads;
-CREATE POLICY anon_read_broker_leads
-ON public.broker_leads
-FOR SELECT
-TO anon
-USING (true);
-
-DROP POLICY IF EXISTS anon_read_scraper_runs ON public.scraper_runs;
-CREATE POLICY anon_read_scraper_runs
-ON public.scraper_runs
-FOR SELECT
-TO anon
-USING (true);
-
-DROP POLICY IF EXISTS anon_update_broker_leads ON public.broker_leads;
-CREATE POLICY anon_update_broker_leads
-ON public.broker_leads
-FOR UPDATE
-TO anon
-USING (true)
-WITH CHECK (true);
-
--- Explicit Data API grants (required for newer Supabase projects).
-REVOKE ALL ON TABLE public.broker_leads FROM anon;
+REVOKE ALL ON TABLE public.niches FROM anon;
+REVOKE ALL ON TABLE public.leads FROM anon;
 REVOKE ALL ON TABLE public.scraper_runs FROM anon;
 
-GRANT SELECT ON TABLE public.broker_leads TO anon;
-GRANT UPDATE (contact_status, outreach_status, notes, first_contact_at, last_contacted_at, followup_due_at, updated_at)
-    ON TABLE public.broker_leads TO anon;
-GRANT SELECT ON TABLE public.scraper_runs TO anon;
-
--- Service role powers the scraper/backend.
-GRANT ALL PRIVILEGES ON TABLE public.broker_leads TO service_role;
+GRANT ALL PRIVILEGES ON TABLE public.niches TO service_role;
+GRANT ALL PRIVILEGES ON TABLE public.leads TO service_role;
 GRANT ALL PRIVILEGES ON TABLE public.scraper_runs TO service_role;
+
+-- ============================================================
+-- DEFAULT NICHES
+-- ============================================================
+INSERT INTO public.niches (slug, name) VALUES
+    ('real_estate', 'Real Estate'),
+    ('dentists', 'Dentists'),
+    ('hvac', 'HVAC'),
+    ('plumbers', 'Plumbers'),
+    ('lawyers', 'Lawyers'),
+    ('clinics', 'Clinics'),
+    ('contractors', 'Contractors')
+ON CONFLICT (slug) DO NOTHING;
 
 -- ============================================================
 -- VERIFY
@@ -120,5 +121,5 @@ GRANT ALL PRIVILEGES ON TABLE public.scraper_runs TO service_role;
 SELECT table_name
 FROM information_schema.tables
 WHERE table_schema = 'public'
-  AND table_name IN ('broker_leads', 'scraper_runs')
+  AND table_name IN ('niches', 'leads', 'scraper_runs')
 ORDER BY table_name;
