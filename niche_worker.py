@@ -50,6 +50,31 @@ def clean_phone(value):
     return value[:30] if len(value) >= 7 else None
 
 
+def find_public_email(website):
+    """Best-effort public email discovery from the business homepage.
+
+    This is intentionally conservative: it only records an address visibly
+    present in the fetched page and never guesses an email address.
+    """
+    if not website:
+        return None
+    try:
+        url = website if website.startswith("http") else f"https://{website}"
+        r = requests.get(url, timeout=12, headers={"User-Agent": "LeadEngine/1.0"})
+        if not r.ok:
+            return None
+        text = r.text[:800_000]
+        matches = re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text, re.I)
+        blocked = {"example.com", "example.org", "sentry.io", "wixpress.com"}
+        for raw in matches:
+            email = raw.lower().strip(".,;:()[]{}<>\"")
+            if email.split("@")[-1] not in blocked:
+                return email
+    except requests.RequestException:
+        return None
+    return None
+
+
 def fingerprint(name, phone):
     return hashlib.md5(f"{name.lower().strip()}|{phone}".encode()).hexdigest()[:16]
 
@@ -98,11 +123,14 @@ def run():
 
             website = str(item.get("site") or "").strip() or None
             signals = check_website(website)
+            email = find_public_email(website)
             lead = {
                 "niche_id": req["niche_id"],
                 "full_name": name,
                 "business_name": name,
                 "phone_number": phone,
+                "email": email,
+                "email_source": "website" if email else None,
                 "whatsapp_number": phone if ("+971" in phone or phone.startswith("971")) else None,
                 "website_url": website,
                 "google_maps_url": item.get("url"),
