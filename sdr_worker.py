@@ -1,9 +1,10 @@
 """Lean LeadEngine SDR worker.
 
-Three jobs run from GitHub Actions:
+Four jobs run from GitHub Actions:
 1) poll Gmail for replies and classify them with the AI
-2) process due follow-ups
-3) prepare/send a small daily batch of personalized first-touch emails
+2) alert the human closer when a reply is HOT
+3) process due follow-ups
+4) prepare/send a small daily batch of personalized first-touch emails
 
 Sending is OFF by default. Enable only after Gmail OAuth + AI secrets are configured
 and the dry-run looks correct.
@@ -28,6 +29,8 @@ GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna")
 FROM_NAME = os.environ.get("SDR_FROM_NAME", "Ameer")
+GMAIL_FROM_EMAIL = os.environ.get("GMAIL_FROM_EMAIL", "")
+HANDOFF_EMAIL = os.environ.get("SDR_HANDOFF_EMAIL", GMAIL_FROM_EMAIL)
 DRY_RUN = os.environ.get("SDR_DRY_RUN", "true").lower() == "true"
 
 FOLLOWUP_DELAYS_DAYS = (3, 5)
@@ -213,9 +216,51 @@ def send_email(token, to_email, subject, body):
     msg = MIMEText(body, "plain", "utf-8")
     msg["To"] = to_email
     msg["Subject"] = subject
-    msg["From"] = formataddr((FROM_NAME, os.environ.get("GMAIL_FROM_EMAIL", "")))
+    msg["From"] = formataddr((FROM_NAME, GMAIL_FROM_EMAIL))
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode().rstrip("=")
     return gmail_api(token, "POST", "messages/send", body={"raw": raw})
+
+
+def build_handoff_alert(lead, reply_subject, reply_body, cls):
+    business = (lead.get("business_name") or "Unknown business").strip()
+    prospect_email = (lead.get("email") or "unknown").strip()
+    phone = (lead.get("phone_number") or "not found").strip()
+    whatsapp = (lead.get("whatsapp_number") or "not verified").strip()
+    city = (lead.get("city") or "").strip()
+    country = (lead.get("country") or "").strip()
+    location = ", ".join(x for x in [city, country] if x) or "unknown"
+    buying_intent = cls.get("buying_intent")
+    score = str(buying_intent) if buying_intent is not None else "unknown"
+    summary = str(cls.get("summary") or "HOT reply detected.").strip()
+    subject = f"HOT LEAD: {business} | {score}/100"
+    body = f"""HOT LEAD — HUMAN ACTION NEEDED
+
+Business: {business}
+Location: {location}
+Prospect email: {prospect_email}
+Phone: {phone}
+WhatsApp: {whatsapp}
+Buying intent: {score}/100
+AI summary: {summary}
+Reply subject: {reply_subject or '(no subject)'}
+
+Prospect reply:
+{reply_body[:5000]}
+
+Recommended action:
+Reply personally now. Answer the prospect's question and move the conversation toward a short call, demo, quote, or booking as appropriate.
+"""
+    return subject, body
+
+
+def notify_hot_handoff(token, lead, reply_subject, reply_body, cls):
+    subject, body = build_handoff_alert(lead, reply_subject, reply_body, cls)
+    if DRY_RUN:
+        print(f"DRY HOT HANDOFF | {HANDOFF_EMAIL or '(no handoff email)'} | {subject}\n{body}\n---")
+        return {"dry_run": True}
+    if not HANDOFF_EMAIL:
+        raise RuntimeError("Missing SDR_HANDOFF_EMAIL or GMAIL_FROM_EMAIL for HOT lead alert")
+    return send_email(token, HANDOFF_EMAIL, subject, body)
 
 
 def load_settings():
@@ -239,6 +284,17 @@ def process_replies(token):
     processed = 0
     for item in data.get("messages", []):
         msg_id = item["id"]
+
+        already_processed = sb("GET", "sdr_email_messages", params={
+            "select": "id",
+            "gmail_message_id": f"eq.{msg_id}",
+            "direction": "eq.inbound",
+            "limit": "1",
+        }) or []
+        if already_processed:
+            gmail_api(token, "POST", f"messages/{msg_id}/modify", body={"removeLabelIds": ["UNREAD"]})
+            continue
+
         msg = gmail_api(token, "GET", f"messages/{msg_id}", params={"format": "full"})
         payload = msg.get("payload", {})
         headers = payload.get("headers", [])
@@ -247,7 +303,11 @@ def process_replies(token):
         if not sender_email:
             continue
         email = sender_email.group(0).lower()
-        leads = sb("GET", "leads", params={"select": "id,business_name,niche_id,email", "email": f"eq.{email}", "limit": "1"}) or []
+        leads = sb("GET", "leads", params={
+            "select": "id,business_name,niche_id,email,phone_number,whatsapp_number,city,country,website_url",
+            "email": f"eq.{email}",
+            "limit": "1",
+        }) or []
         if not leads:
             continue
         lead = leads[0]
@@ -261,7 +321,7 @@ def process_replies(token):
         sb("POST", "sdr_email_messages", body={
             "lead_id": lead["id"], "direction": "inbound", "gmail_message_id": msg_id,
             "gmail_thread_id": msg.get("threadId"), "from_email": email,
-            "to_email": os.environ.get("GMAIL_FROM_EMAIL"), "subject": subject,
+            "to_email": GMAIL_FROM_EMAIL, "subject": subject,
             "body_text": body[:12000], "status": "processed", "ai_classification": classification,
             "ai_summary": str(cls.get("summary", ""))[:500], "buying_intent": cls.get("buying_intent"),
             "received_at": now(), "processed_at": now()
@@ -271,6 +331,13 @@ def process_replies(token):
             "followup_due_at": None,
             "last_checked_at": now(),
         })
+
+        if classification == "hot":
+            try:
+                notify_hot_handoff(token, lead, subject, body, cls)
+            except Exception as exc:
+                print(f"HOT handoff alert failed for {email}: {exc}")
+
         gmail_api(token, "POST", f"messages/{msg_id}/modify", body={"removeLabelIds": ["UNREAD"]})
         processed += 1
     print(f"SDR replies processed: {processed}")
@@ -372,7 +439,7 @@ def process_followups(token):
         sb("POST", "sdr_email_messages", body={
             "lead_id": lead["id"], "direction": "outbound",
             "gmail_message_id": result.get("id"), "gmail_thread_id": result.get("threadId"),
-            "from_email": os.environ.get("GMAIL_FROM_EMAIL"), "to_email": email,
+            "from_email": GMAIL_FROM_EMAIL, "to_email": email,
             "subject": subject, "body_text": body, "status": "sent", "sent_at": sent_time,
         }, prefer="return=minimal")
 
@@ -439,7 +506,7 @@ def send_batch(token):
         sent_time = now()
         sb("POST", "sdr_email_messages", body={
             "lead_id": lead["id"], "direction": "outbound", "gmail_message_id": result.get("id"),
-            "gmail_thread_id": result.get("threadId"), "from_email": os.environ.get("GMAIL_FROM_EMAIL"),
+            "gmail_thread_id": result.get("threadId"), "from_email": GMAIL_FROM_EMAIL,
             "to_email": email, "subject": subject, "body_text": body, "status": "sent", "sent_at": sent_time,
         }, prefer="return=minimal")
         sb("PATCH", "leads", params={"id": f"eq.{lead['id']}"}, body={
