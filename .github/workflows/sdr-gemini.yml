@@ -62,7 +62,7 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-3.7-flash
+          GEMINI_MODEL: gemini-3.8-flash
           GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
           SDR_FROM_NAME: ${{ secrets.SDR_FROM_NAME || 'Ameer' }}
           SDR_DRY_RUN: 'true'
