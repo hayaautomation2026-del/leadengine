@@ -2,125 +2,134 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#07100d">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<title>LeadEngine Mission Control — Phase 1 Demo</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src data:; form-action 'none'; base-uri 'none'">
+<meta name="theme-color" content="#122b2b">
+<title>LeadEngine — Your SDR</title>
 <style>
-:root{--bg:#07100d;--panel:#0e1b17;--panel2:#101f1a;--line:#244039;--text:#f3fff9;--muted:#8eaaa0;--green:#46f59c;--blue:#65bfff;--orange:#ffac4d;--red:#ff626f;--purple:#bf88ff}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}.wrap{max-width:1180px;margin:auto;padding:16px 16px 90px}.top{position:sticky;top:0;z-index:5;margin:-16px -16px 14px;padding:12px 16px;background:#07100df2;backdrop-filter:blur(12px);border-bottom:1px solid #ffffff0d;display:flex;align-items:center;justify-content:space-between;gap:10px}.brand{font-size:21px;font-weight:900}.brand span{color:var(--green)}.sub{font-size:11px;color:var(--muted);margin-top:2px}.topright{display:flex;align-items:center;gap:8px}.state{font-size:11px;font-weight:900;border-radius:999px;padding:7px 10px;border:1px solid var(--line);white-space:nowrap}.state.live{color:var(--green);border-color:#46f59c55;background:#46f59c12}.state.stop{color:#d7e5df}.state.kill{color:var(--red);border-color:#ff626f66;background:#ff626f12}.iconbtn{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:8px 10px;cursor:pointer}.panel{background:var(--panel);border:1px solid #ffffff0f;border-radius:18px;margin-bottom:12px;overflow:hidden}.pad{padding:15px}.control{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;align-items:center}.control h1{font-size:21px;margin:0 0 4px}.muted{color:var(--muted);font-size:12px;line-height:1.45}.controlBtns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.btn{border:1px solid var(--line);background:#0a1512;color:var(--text);border-radius:12px;padding:11px 12px;font-weight:800;cursor:pointer}.btn:disabled{opacity:.45;cursor:not-allowed}.btn.start{background:var(--green);color:#04100a;border-color:var(--green)}.btn.stop{color:#dce9e3}.btn.kill{background:#241015;color:#ff8891;border-color:#5a2630}.btn.approve{background:#163d2c;color:#70ffb5;border-color:#2b6e50}.btn.skip{color:#aebeb8}.btn.small{padding:8px 10px;font-size:12px}.controlRow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.seg{display:flex;border:1px solid var(--line);border-radius:11px;overflow:hidden}.seg button{border:0;background:transparent;color:var(--muted);padding:8px 11px;font-weight:800;cursor:pointer}.seg button.on{background:#173129;color:var(--green)}select,input{background:#091410;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:9px 10px}.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px}.kpi{background:var(--panel);border:1px solid #ffffff0f;border-radius:15px;padding:12px}.kpi .n{font-size:23px;font-weight:900;margin-top:3px}.kpi .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.green{color:var(--green)}.blue{color:var(--blue)}.orange{color:var(--orange)}.red{color:var(--red)}.purple{color:var(--purple)}.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(290px,.65fr);gap:12px}.ph{padding:13px 15px;border-bottom:1px solid #ffffff0e;display:flex;justify-content:space-between;align-items:center;gap:10px}.ph b{font-size:14px}.body{padding:7px}.lead{padding:12px;border:1px solid #ffffff0e;border-radius:14px;margin:7px;background:#091511}.leadTop{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.name{font-weight:900;font-size:14px}.score{font-weight:900;color:var(--orange);font-size:13px}.meta{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.35}.reason{font-size:12px;margin-top:8px;line-height:1.4;color:#d7e8e1}.tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}.tag{font-size:9px;border:1px solid var(--line);border-radius:999px;padding:4px 7px;color:#aac0b8}.tag.ready{color:var(--green);border-color:#46f59c44}.tag.approved{color:var(--blue);border-color:#65bfff44}.actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px}.empty{padding:22px;text-align:center;color:var(--muted);font-size:13px}.hot{padding:12px;margin:7px;border:1px solid #ffac4d44;border-radius:14px;background:#251a0d}.hot .summary{font-size:12px;margin-top:6px;line-height:1.4}.event{padding:10px 8px;border-bottom:1px solid #ffffff0c}.event:last-child{border-bottom:0}.event b{font-size:12px}.event .meta{font-size:10px}.sectionGap{height:1px;margin:12px 0;background:#ffffff0d}details{border-top:1px solid #ffffff0e}summary{cursor:pointer;padding:13px 15px;font-weight:800;font-size:13px}.searchgrid{display:grid;grid-template-columns:1fr 180px 80px auto;gap:7px;padding:0 15px 15px}.login{position:fixed;inset:0;z-index:20;background:#030907f7;display:grid;place-items:center;padding:20px}.login.hidden{display:none}.loginCard{width:min(400px,100%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:22px}.loginCard input{width:100%;margin:7px 0;padding:12px}.error{font-size:11px;color:var(--red);min-height:16px}.mobileKill{display:none}.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:30;background:#17251f;color:#f4fff9;border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:12px;opacity:0;pointer-events:none;transition:.2s}.toast.show{opacity:1}.tiny{font-size:10px;color:var(--muted)}
-@media(max-width:820px){.wrap{padding:12px 10px 88px}.top{margin:-12px -10px 10px;padding:10px}.brand{font-size:18px}.topright .iconbtn{display:none}.control{grid-template-columns:1fr}.controlBtns{grid-template-columns:1.3fr 1fr .8fr}.kpis{grid-template-columns:repeat(3,1fr)}.kpi{padding:10px}.kpi .n{font-size:20px}.grid{grid-template-columns:1fr}.searchgrid{grid-template-columns:1fr 1fr}.searchgrid .wide{grid-column:1/-1}.lead{margin:6px;padding:11px}.mobileKill{display:block;position:fixed;right:12px;bottom:13px;z-index:8;border:1px solid #ff626f77;background:#291117;color:#ff8b94;border-radius:999px;padding:11px 13px;font-weight:900;box-shadow:0 8px 24px #0008}.state{font-size:9px;padding:6px 8px}.sub{display:none}}
-@media(max-width:420px){.kpis{grid-template-columns:repeat(3,1fr)}.kpi .l{font-size:8px}.controlBtns{grid-template-columns:1.25fr 1fr .75fr}.btn{padding:10px 8px;font-size:12px}}
+:root{--ink:#122b2b;--muted:#526764;--bg:#f5f6f0;--paper:#fff;--line:#d9e1d8;--green:#d7f87a;--deep:#214b40;--soft:#edf3e8}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,Helvetica,sans-serif;font-size:17px;line-height:1.55}button,input,select{font:inherit}button{cursor:pointer}button:disabled{cursor:default;opacity:.5}[hidden]{display:none!important}:focus-visible{outline:3px solid #247cbb;outline-offset:4px}h1,h2,h3,p{margin:0}h1{font-size:clamp(30px,4vw,49px);line-height:1.13;letter-spacing:-1.5px;font-weight:700}h2{font-size:23px;line-height:1.25}h3{font-size:19px}.muted{color:var(--muted)}.small{font-size:14px}.eyebrow{font-size:12px;letter-spacing:1.5px;font-weight:700;text-transform:uppercase;color:var(--deep);margin-bottom:12px}.shell{max-width:1160px;margin:0 auto;padding:0 26px 40px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:25px 0;border-bottom:1px solid var(--line)}.brand{font-size:24px;font-weight:800;letter-spacing:-1px}.brand span{background:var(--ink);color:var(--green);padding:4px 9px;margin-right:8px;border-radius:9px}.badge{font-size:12px;font-weight:bold;padding:6px 11px;background:#e7edde;border:1px solid #ced9c1;border-radius:30px;white-space:nowrap}.safe{font-size:14px;padding:13px 0;color:var(--muted)}.hero{display:flex;align-items:center;justify-content:space-between;gap:25px;padding:30px 0}.hero p{max-width:530px;margin-top:14px}.hero-note{max-width:225px;padding-left:20px;border-left:2px solid #bacdad;font-size:15px}.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}.card{background:var(--paper);border:1px solid var(--line);border-radius:19px;padding:25px}.form-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}.field{display:block;margin:0 0 18px}.field>span{display:block;font-weight:700;font-size:15px;margin-bottom:7px}.field input,.field select{width:100%;border:1px solid #bbc9c0;background:#fafcf8;border-radius:10px;padding:12px;color:var(--ink);min-height:49px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.primary,.secondary,.textbtn{border-radius:10px;padding:12px 18px;min-height:46px;font-weight:bold;border:1px solid transparent}.primary{background:var(--ink);color:var(--green)}.primary:hover{background:#21443f}.secondary{background:#fff;border-color:#b7c6bc;color:var(--ink)}.textbtn{background:transparent;color:var(--deep);text-decoration:underline;padding:7px 3px;font-size:14px}.wide{width:100%}.form-foot{margin-top:11px;text-align:center;font-size:13px;color:var(--muted)}.responsibilities{background:var(--soft)}.responsibilities ul{padding-left:20px;margin:15px 0 24px}.responsibilities li{margin:9px 0;font-size:15px}.responsibilities p{font-size:15px}.divider{height:1px;background:var(--line);margin:18px 0}.error{color:#9c3029;font-size:14px;margin-bottom:10px}.campaign{font-size:14px;color:var(--muted);margin-bottom:17px;overflow-wrap:anywhere}.statusbox{background:var(--ink);border-radius:17px;color:#fff;padding:25px}.statusline{display:flex;justify-content:space-between;gap:14px;align-items:center}.statusbox .eyebrow{color:var(--green)}.statusbox h2{font-size:27px}.statusbox p{color:#d2dfd7;font-size:15px;margin-top:8px}.statusbox .secondary{background:transparent;color:#fff;border-color:#718b7c}.track{height:6px;background:#486259;border-radius:10px;overflow:hidden;margin-top:23px}.fill{height:100%;background:var(--green);transition:width .4s}.progress-caption{margin-top:9px;font-size:12px;color:#d2dfd7}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0 25px}.stat{border:1px solid var(--line);background:#fff;border-radius:13px;padding:16px}.stat strong{font-size:29px;display:block;line-height:1.2}.stat span{font-size:13px;color:var(--muted)}.sectionhead{display:flex;justify-content:space-between;align-items:center;margin:0 0 14px}.empty{border:1px dashed #b9c8b9;border-radius:16px;padding:28px;text-align:center;background:#f9fbf6}.empty p{font-size:15px;margin-top:8px}.opportunity{margin-bottom:12px;padding:21px;background:#fff;border:1px solid var(--line);border-radius:15px}.opphead{display:flex;justify-content:space-between;gap:12px;align-items:start}.opportunity p{font-size:15px;margin:10px 0}.tags{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0 17px}.tag{font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:#f5f8f1}.pill{color:#2c542b;background:#e4f4ce;border-radius:25px;padding:4px 9px;font-size:12px;font-weight:700;white-space:nowrap}.brief{border-top:1px solid var(--line);padding-top:16px;margin-top:15px}.brief ol{padding-left:22px;font-size:15px}.quote{border-left:3px solid #b9d67d;padding-left:12px}.brief .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.timeline{padding-left:20px;font-size:14px}.timeline li{margin:12px 0;color:var(--muted)}.timeline li.done{color:var(--ink)}details{border:1px solid var(--line);border-radius:12px;background:#fff;margin-top:16px;padding:15px}summary{cursor:pointer;font-weight:bold;font-size:15px}footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);margin-top:30px;padding-top:16px;display:flex;justify-content:space-between;gap:20px}.phase{display:flex;justify-content:space-between;padding:9px 0;font-size:14px}.phase em{font-style:normal;color:var(--muted);font-size:12px}.done-state{border-color:#c5d7b4}.notice{margin-top:12px;font-size:13px;color:var(--muted)}
+@media(max-width:760px){.shell{padding:0 16px 28px}.top{padding:17px 0}.hero{padding:22px 0}.hero-note{display:none}.layout{grid-template-columns:1fr}.card{padding:21px}.responsibilities{order:2}.hero h1{font-size:34px}.stats{gap:8px}.stat{padding:12px}.statusbox{padding:20px}.statusline{align-items:flex-start}.statusbox h2{font-size:24px}.badge{font-size:11px}.two{grid-template-columns:1fr;gap:0}footer{flex-direction:column;gap:7px}.opphead{flex-direction:column;gap:6px}.brand{font-size:21px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header class="top"><div><div class="brand">⚡ Lead<span>Engine</span></div><div class="sub">Daily mission control</div></div><div class="topright"><span id="statePill" class="state stop">STOPPED</span><button class="iconbtn" onclick="refreshAll()">↻</button><button class="iconbtn" onclick="resetDemo()">Reset demo</button></div></header>
-
-  <section class="panel" style="padding:14px;border-color:#ffac4d"><strong>PHASE 1 — MOCK DATA ONLY</strong><div class="muted">No password. No real emails. No live database access. All buttons simulate actions. Reload resets the demo.</div><button class="btn small" onclick="resetDemo()" style="margin-top:8px">Reset demo</button></section>
-  <section class="panel"><div class="pad control"><div><h1 id="controlTitle">SDR stopped</h1><div class="muted" id="controlHint">Approve useful leads first. Nothing sends while stopped.</div><div class="controlRow"><div class="seg"><button id="manualBtn" onclick="setMode('manual')">MANUAL</button><button id="autoBtn" onclick="setMode('auto')">AUTO</button></div><span class="tiny">Daily cap</span><select id="cap" onchange="setCap()"><option>3</option><option>5</option><option>10</option><option>20</option><option>30</option></select><span class="tiny" id="lastSync"></span></div></div><div class="controlBtns"><button id="startBtn" class="btn start" onclick="startSDR()">▶ START</button><button class="btn stop" onclick="stopSDR()">■ STOP</button><button class="btn kill" onclick="killSDR()">KILL</button></div></div></section>
-
-  <section class="kpis">
-    <div class="kpi"><div class="l">Scraped today</div><div class="n blue" id="kScraped">0</div></div>
-    <div class="kpi"><div class="l">Useful</div><div class="n orange" id="kUseful">0</div></div>
-    <div class="kpi"><div class="l">Approved</div><div class="n purple" id="kApproved">0</div></div>
-    <div class="kpi"><div class="l">Sent today</div><div class="n green" id="kSent">0</div></div>
-    <div class="kpi"><div class="l">Replies</div><div class="n blue" id="kReplies">0</div></div>
-    <div class="kpi"><div class="l">HOT now</div><div class="n red" id="kHot">0</div></div>
-  </section>
-
-  <div class="grid">
-    <main>
-      <section class="panel"><div class="ph"><b>Useful leads — your decision</b><span class="tiny" id="queueCount"></span></div><div id="leadQueue" class="body"></div></section>
-    </main>
-    <aside>
-      <section class="panel"><div class="ph"><b>🔥 HOT / replies</b><span class="tiny">Human attention</span></div><div id="hotBox" class="body"></div></section>
-      <section class="panel"><div class="ph"><b>Today — important only</b></div><div id="activity" class="body"></div></section>
-      <section class="panel"><details><summary>Find more leads</summary><div class="searchgrid"><input class="wide" id="query" placeholder="e.g. dentists in Abu Dhabi"><select id="niche"></select><select id="limit"><option>10</option><option>20</option><option>30</option><option>50</option></select><button id="run" class="btn start" onclick="runSearch()">Find</button></div></details></section>
-    </aside>
-  </div>
+<div class="shell">
+<header class="top"><div class="brand"><span>↗</span>LeadEngine</div><span class="badge">PHASE 1 · DEMO</span></header>
+<div class="safe">Fictional businesses. No real emails. No live data access.</div>
+<section class="hero"><div><div class="eyebrow">Your sales development assistant</div><h1>Your SDR works.<br>You close.</h1><p class="muted">Set the direction once. Your SDR finds prospects, follows up, and brings you the interested ones.</p></div><div class="hero-note"><strong>Less managing.<br>More conversations.</strong><p class="small muted">This demo shows the workflow in about 20 seconds.</p></div></section>
+<div class="layout">
+<main>
+<section id="setup" class="card">
+<div class="form-title"><h2>What are we selling?</h2><span class="badge">Set once</span></div>
+<form id="campaignForm">
+<label class="field" for="offer"><span>Your service</span><input id="offer" maxlength="120" required value="Social media content packages" autocomplete="off"></label>
+<div class="two"><label class="field" for="audience"><span>Which businesses?</span><input id="audience" maxlength="80" required value="Travel & tour operators" autocomplete="off"></label><label class="field" for="location"><span>Where?</span><input id="location" maxlength="80" required value="Dubai, UAE" autocomplete="off"></label></div>
+<p id="formError" class="error" role="alert" hidden></p>
+<button class="primary wide" type="submit">Start my SDR demo →</button>
+<p class="form-foot">Try the example above, or change it. No approvals needed at each step.</p>
+</form></section>
+<section id="workspace" hidden>
+<div class="campaign" id="campaignSummary"></div>
+<div class="statusbox">
+<div class="statusline"><div aria-live="polite" aria-atomic="true"><div class="eyebrow" id="statusLabel">Demo running</div><h2 id="statusTitle"></h2></div><button id="pauseBtn" class="secondary" type="button">Pause</button></div>
+<p id="statusHint"></p><div class="track" role="progressbar" aria-label="Demo progress" aria-valuemin="0" aria-valuemax="6" id="progress"><div class="fill" id="progressFill"></div></div><div class="progress-caption" id="stepText"></div>
 </div>
-<button class="mobileKill" onclick="killSDR()">KILL</button>
-<div id="toast" class="toast"></div>
-
+<div class="stats" aria-label="Simulated results"><div class="stat"><strong id="found">0</strong><span>Businesses found</span></div><div class="stat"><strong id="contacted">0</strong><span>Contacted</span></div><div class="stat"><strong id="ready">0</strong><span>Ready for you</span></div></div>
+<div class="sectionhead"><h2>Needs your attention</h2><span class="badge">Mock results</span></div>
+<div id="opportunities"></div>
+<details><summary>What the SDR handled</summary><ol class="timeline" id="timeline"></ol><p class="small muted">Scripted examples, not AI predictions or expected sales results. “Days” are compressed into seconds.</p></details>
+<button class="textbtn" id="resetBtn" type="button">Change campaign / start over</button>
+<p id="storageNotice" class="notice"></p>
+</section>
+</main>
+<aside class="card responsibilities">
+<div class="eyebrow">The division of work</div><h2>Let it do the legwork.</h2>
+<ul><li>Find businesses that fit.</li><li>Write and send tailored outreach.</li><li>Follow up without chasing you.</li><li>Check interest, budget, and timing.</li><li>Stop on a “no”. Hand over a “yes”.</li></ul>
+<strong>Your part</strong><p>Review interested prospects. Take over the sales conversation.</p>
+<div class="divider"></div>
+<div class="phase"><strong>1 · Build & test</strong><span class="pill">Here now</span></div><div class="phase"><span>2 · Small live tests</span><em>Not enabled</em></div><div class="phase"><span>3 · Scale up</span><em>Not enabled</em></div>
+<p class="notice">This browser demo is not a 24/7 worker. It runs while this page is open. Reopening pauses it until you resume.</p>
+</aside>
+</div>
+<footer><span>PHASE 1 / Nothing leaves this dashboard.</span><span>Real database and background automation are not controlled here.</span></footer>
+</div>
 <script>
-
-let leads=[],requests=[],runs=[],niches=[],messages=[],settings={};
+'use strict';
 const $=id=>document.getElementById(id);
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function toast(t){const x=$('toast');x.textContent='DEMO: '+t;x.classList.add('show');setTimeout(()=>x.classList.remove('show'),2200)}
-function seedDemo(){
- const now=new Date().toISOString();
- settings={kill_switch:false,sending_enabled:false,approval_mode:'manual',daily_send_cap:3,min_pain_score:50};
- niches=[{id:'travel',name:'Travel & tours'},{id:'dental',name:'Dentists'}];
- leads=Array.from({length:6},(_,i)=>({id:'demo-'+i,business_name:['Sample Desert Tours','Sample City Dental','Sample Palm Travel','Sample Creek Tours','Sample Smile Clinic','Sample Horizon Travel'][i],email:'demo'+i+'@example.com',city:'Abu Dhabi',country:'UAE',niche_id:i===1||i===4?'dental':'travel',pain_score:92-i*6,pain_reason:'Fictional example: follow-up support may be useful.',created_at:now,outreach_status:i===5?'hot':i===4?'contacted':'pending'}));
- messages=[{id:'demo-reply',lead_id:'demo-5',direction:'inbound',status:'received',ai_classification:'hot',buying_intent:85,ai_summary:'Sample reply: interested in discussing the service.',received_at:now},{id:'demo-sent',lead_id:'demo-4',direction:'outbound',status:'sent',sent_at:now}];
- runs=[{id:'demo-run',started_at:now,status:'completed (mock)',leads_inserted:6}];requests=[];
+const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const STORE='leadengine-sdr-demo-v2';
+const STAGES=[
+ ['Finding suitable businesses','The SDR is searching your chosen market. You do not need to do anything.'],
+ ['Checking who is worth contacting','Filtering for fit and usable contact details. Poor matches are left out.'],
+ ['Writing and sending outreach','Tailored messages are being simulated. No real emails are sent.'],
+ ['Following up automatically','Simulating a later follow-up to people who have not replied.'],
+ ['Checking replies and buying intent','The SDR checks interest, budget, and timing, and stops contacting anyone who says no.'],
+ ['Preparing your handover','Pulling the useful conversations into short briefs for you.'],
+ ['Your opportunities are ready','The demo is complete. Review the briefs below; the routine work is already handled.']
+];
+const EVENTS=[
+ 'Found 12 fictional businesses in your target market.',
+ 'Kept 8 suitable businesses; skipped 4 poor fits or missing contacts.',
+ 'Simulated 8 tailored first emails. No real messages sent.',
+ 'Simulated one follow-up to 6 non-responders, two days later.',
+ 'Simulated 3 replies: 2 interested, 1 not interested. Stopped follow-ups to all 3.',
+ 'Prepared 2 interested opportunities; budgets still need confirmation. 5 have not replied; no more follow-ups in this demo.'
+];
+let state={version:2,campaign:null,stage:0,status:'idle',handled:[],opened:null};
+let timer=null,storageOK=true;
+function valid(s){return s&&s.version===2&&s.campaign&&['offer','audience','location'].every(k=>typeof s.campaign[k]==='string'&&s.campaign[k].trim().length>0&&s.campaign[k].length<=120)&&Number.isInteger(s.stage)&&s.stage>=0&&s.stage<=6&&['running','paused','complete'].includes(s.status)&&Array.isArray(s.handled)&&s.handled.every(x=>x===0||x===1)}
+function save(){try{localStorage.setItem(STORE,JSON.stringify(state))}catch{storageOK=false}}
+function restore(){try{const s=JSON.parse(localStorage.getItem(STORE));if(valid(s)){state=s;state.opened=null;state.status=state.stage===6?'complete':'paused';}}catch{storageOK=false}}
+function cancelTimer(){if(timer!==null){clearTimeout(timer);timer=null}}
+function schedule(){cancelTimer();if(state.status==='running')timer=setTimeout(tick,3000)}
+function tick(){timer=null;if(state.status!=='running')return;state.stage=Math.min(6,state.stage+1);if(state.stage===6)state.status='complete';save();render();schedule()}
+function start(event){event.preventDefault();if(state.status==='running')return;
+ const campaign={offer:$('offer').value.trim(),audience:$('audience').value.trim(),location:$('location').value.trim()};
+ if(Object.values(campaign).some(v=>!v)){ $('formError').hidden=false;$('formError').textContent='Please fill in your service, business type, and location.';return}
+ cancelTimer();state={version:2,campaign,stage:0,status:'running',handled:[],opened:null};save();render();schedule();
 }
-function simulateBatch(){
- if(!settings.sending_enabled||settings.kill_switch)return;
- const count=messages.filter(m=>m.direction==='outbound'&&m.status==='sent'&&localDay(m.sent_at)).length;
- const candidates=leads.filter(l=>l.outreach_status==='approved'||(settings.approval_mode==='auto'&&useful(l)));
- candidates.slice(0,Math.max(0,settings.daily_send_cap-count)).forEach(l=>{l.outreach_status='contacted';messages.push({id:'mock-'+messages.length,lead_id:l.id,direction:'outbound',status:'sent',sent_at:new Date().toISOString()})});
+function togglePause(){if(state.status==='running'){state.status='paused';cancelTimer()}else if(state.status==='paused'){state.status='running';schedule()}save();render()}
+function reset(){if(!confirm('Start over? This clears only the fictional results in this browser.'))return;
+ cancelTimer();if(state.campaign){for(const k of ['offer','audience','location'])$(k).value=state.campaign[k]}
+ state={version:2,campaign:null,stage:0,status:'idle',handled:[],opened:null};try{localStorage.removeItem(STORE)}catch{storageOK=false}
+ $('formError').hidden=true;render();$('offer').focus();
 }
-async function brain(action,payload={}){
- const lead=payload.id?leads.find(l=>l.id===payload.id):null;
- if(['approve_lead','skip_lead','reconsider_lead'].includes(action)){
-  if(!lead)throw Error('Mock lead not found');
-  lead.outreach_status={approve_lead:'approved',skip_lead:'skipped',reconsider_lead:'pending'}[action];
- }else if(action==='sdr_start'){settings.sending_enabled=true;settings.kill_switch=false;settings.daily_send_cap=payload.daily_send_cap}
- else if(action==='sdr_stop')settings.sending_enabled=false;
- else if(action==='sdr_kill'){settings.sending_enabled=false;settings.kill_switch=true}
- else if(action==='sdr_mode')settings.approval_mode=payload.mode;
- else if(action==='sdr_cap')settings.daily_send_cap=payload.daily_send_cap;
- else if(action==='search'){
-  const now=new Date().toISOString(),n=Math.min(50,Math.max(1,Number(payload.max_leads)||10));
-  for(let i=0;i<n;i++){const id='mock-'+leads.length;leads.push({id,business_name:'Sample '+payload.query+' '+(i+1),email:id+'@example.com',city:payload.location||'Demo city',country:'Demo',niche_id:payload.niche_id,pain_score:65+(i%25),pain_reason:'Generated mock lead — no real business was searched.',created_at:now,outreach_status:'pending'})}
-  runs.unshift({started_at:now,status:'completed (mock)',leads_inserted:n});
- }
- else if(action!=='dashboard')throw Error('Unsupported demo action');
- if(action!=='dashboard')simulateBatch();
- return {leads,requests,runs,niches,messages,sdr_settings:settings};
+function openBrief(id){state.opened=state.opened===id?null:id;renderOpportunities()}
+function takeOver(id){if(state.stage!==6||![0,1].includes(id)||state.handled.includes(id))return;state.handled.push(id);save();render()}
+function renderOpportunities(){
+ if(state.stage<6){$('opportunities').innerHTML='<div class="empty"><strong>Nothing for you to do yet.</strong><p class="muted">The SDR will bring interested prospects here automatically.</p></div>';return}
+ $('opportunities').innerHTML=[0,1].map(id=>{
+ const handled=state.handled.includes(id),open=state.opened===id;
+ const name='Sample '+state.campaign.audience+' '+(id+1);
+ const reply=id===0?'We are interested. Could we discuss what is included and your pricing?':'This could be useful. Please send the details; we are planning for next month.';
+ const timing=id===0?'This month':'Next month';
+ const price=id===0?'Not confirmed':'Asked for pricing';
+ return '<article class="opportunity '+(handled?'done-state':'')+'"><div class="opphead"><h3>'+esc(name)+'</h3><span class="pill">'+(handled?'Taken over · demo':'Interested · demo')+'</span></div><p class="muted">'+esc(state.campaign.location)+' · Fictional business</p><p>'+esc(reply)+'</p><div class="tags"><span class="tag">Interest: confirmed</span><span class="tag">Budget: '+price+'</span><span class="tag">Timing: '+timing+'</span></div><button class="secondary wide" data-open="'+id+'" aria-expanded="'+open+'">'+(open?'Close brief':'View conversation & next step')+'</button>'+
+ (open?'<div class="brief"><div class="eyebrow">Mock conversation</div><p><strong>SDR:</strong> Hi, could '+esc(state.campaign.offer)+' help your '+esc(state.campaign.audience)+' business in '+esc(state.campaign.location)+'? Happy to explain the options.</p><p class="quote"><strong>Prospect:</strong> '+esc(reply)+'</p><p><strong>SDR:</strong> Are you considering this soon, and do you have a budget in mind?</p><p class="quote"><strong>Prospect:</strong> '+(id===0?'This month, if it fits. We have not set a budget yet.':'Next month. Please share pricing first.')+'</p><div class="divider"></div><h3>Your next step</h3><ol><li>Discuss the service and confirm their budget.</li><li>Offer a short call if there is a fit.</li></ol><p class="small muted">No appointment has been booked. Budget is not yet qualified. Contact: sample'+(id+1)+'@example.com (fictional).</p><div class="actions"><button class="primary" data-take="'+id+'" '+(handled?'disabled':'')+'>'+(handled?'Taken over':'I’ll take it from here — demo')+'</button></div></div>':'')+'</article>';
+ }).join('');
+ document.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>openBrief(Number(b.dataset.open))));
+ document.querySelectorAll('[data-take]').forEach(b=>b.addEventListener('click',()=>takeOver(Number(b.dataset.take))));
 }
-function resetDemo(){seedDemo();refreshAll();toast('Sample data reset')}
-function localDay(ts){if(!ts)return false;const d=new Date(ts),n=new Date();return d.getFullYear()===n.getFullYear()&&d.getMonth()===n.getMonth()&&d.getDate()===n.getDate()}
-function leadName(l){return l.business_name||l.full_name||'Unknown business'}
-function nicheName(id){return niches.find(n=>n.id===id)?.name||''}
-function useful(l){return !!l.email && Number(l.pain_score||0)>=Number(settings.min_pain_score||50) && !['contacted','hot','warm','suppressed','stopped','skipped'].includes(l.outreach_status)}
-function eventTime(ts){if(!ts)return '';return new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
-async function refreshAll(){ $('niche').innerHTML=niches.map(n=>`<option value="${n.id}">${esc(n.name)}</option>`).join('');render();$('lastSync').textContent='Mock data · this tab only'; }
 function render(){
-  const killed=!!settings.kill_switch, live=!!settings.sending_enabled&&!killed, mode=(settings.approval_mode||'manual').toLowerCase();
-  const pill=$('statePill');pill.className='state '+(killed?'kill':live?'live':'stop');pill.textContent=killed?'KILLED':live?`SIMULATING • ${mode.toUpperCase()}`:`STOPPED • ${mode.toUpperCase()}`;
-  $('controlTitle').textContent=killed?'Emergency stop engaged':live?`Demo running — ${mode}`:'SDR stopped';
-  $('controlHint').textContent=killed?'No outbound work can run. Reset by pressing START when ready.':mode==='manual'?'Only leads you APPROVE can be contacted.':'AUTO can process useful pending leads without individual approval.';
-  $('manualBtn').className=mode==='manual'?'on':'';$('autoBtn').className=mode==='auto'?'on':'';$('cap').value=String(settings.daily_send_cap||3);
-  const scrapedToday=leads.filter(l=>localDay(l.created_at));const usefulToday=scrapedToday.filter(useful);const approved=leads.filter(l=>l.outreach_status==='approved');const sent=messages.filter(m=>m.direction==='outbound'&&m.status==='sent'&&localDay(m.sent_at||m.created_at));const replies=messages.filter(m=>m.direction==='inbound'&&localDay(m.received_at||m.created_at));const hotLeads=leads.filter(l=>l.outreach_status==='hot');
-  $('kScraped').textContent=scrapedToday.length;$('kUseful').textContent=usefulToday.length;$('kApproved').textContent=approved.length;$('kSent').textContent=sent.length;$('kReplies').textContent=replies.length;$('kHot').textContent=hotLeads.length;
-  renderQueue(mode);renderHot();renderActivity();
+ const active=state.status!=='idle';$('setup').hidden=active;$('workspace').hidden=!active;if(!active)return;
+ $('campaignSummary').textContent=state.campaign.offer+' · '+state.campaign.audience+' · '+state.campaign.location;
+ const paused=state.status==='paused',complete=state.stage===6;
+ $('statusLabel').textContent=paused?'Demo paused':complete?'Demo complete':'SDR working · simulation';
+ $('statusTitle').textContent=paused?'Paused. You are in control.':STAGES[state.stage][0];
+ $('statusHint').textContent=paused?'Press Resume to continue from where you stopped. No new demo actions happen while paused.':STAGES[state.stage][1];
+ $('pauseBtn').hidden=complete;$('pauseBtn').textContent=paused?'Resume':'Pause';
+ $('progress').setAttribute('aria-valuenow',String(state.stage));$('progressFill').style.width=(state.stage/6*100)+'%';
+ $('stepText').textContent=state.stage+' of 6 tasks completed automatically';
+ $('found').textContent=state.stage>=1?'12':'0';$('contacted').textContent=state.stage>=3?'8':'0';$('ready').textContent=complete?String(2-state.handled.length):'0';
+ $('timeline').innerHTML=EVENTS.map((e,i)=>'<li class="'+(i<state.stage?'done':'')+'">'+(i<state.stage?'✓ '+esc(e):'Pending: '+esc(STAGES[i][0]))+'</li>').join('');
+ $('storageNotice').textContent=storageOK?'Demo progress is saved on this browser only. Reopening pauses unfinished work.':'Browser storage is unavailable. You can still test; reloading will reset progress.';
+ renderOpportunities();
 }
-function renderQueue(mode){
-  const q=leads.filter(l=>useful(l)||l.outreach_status==='approved').sort((a,b)=>(b.pain_score||0)-(a.pain_score||0));$('queueCount').textContent=q.length+' ready';
-  $('leadQueue').innerHTML=q.length?q.slice(0,20).map(l=>{const approved=l.outreach_status==='approved';const grade=(l.pain_score||0)>=70?'STRONG':'USEFUL';const auto=mode==='auto'&&!approved;return `<article class="lead"><div class="leadTop"><div><div class="name">${esc(leadName(l))}</div><div class="meta">${esc([nicheName(l.niche_id),l.city,l.country].filter(Boolean).join(' · '))}</div></div><div class="score">${l.pain_score||0}/100</div></div><div class="reason">${esc(l.pain_reason||'Contact-ready business')}</div><div class="tags"><span class="tag ready">${grade}</span><span class="tag">${esc(l.email)}</span>${approved?'<span class="tag approved">APPROVED</span>':''}${auto?'<span class="tag approved">AUTO ELIGIBLE</span>':''}${localDay(l.created_at)?'<span class="tag">TODAY</span>':''}</div><div class="actions">${approved?`<button class="btn small" onclick="reconsider('${l.id}')">Undo approval</button>`:`<button class="btn approve" onclick="approve('${l.id}')">✓ APPROVE</button>`}<button class="btn skip" onclick="skipLead('${l.id}')">Skip</button></div></article>`}).join(''):'<div class="empty">Nothing needs a decision right now.</div>';
-}
-function renderHot(){
-  const inbound=messages.filter(m=>m.direction==='inbound').slice(0,12);const hot=inbound.filter(m=>m.ai_classification==='hot');const items=(hot.length?hot:inbound).slice(0,5);
-  $('hotBox').innerHTML=items.length?items.map(m=>{const l=leads.find(x=>x.id===m.lead_id);return `<div class="hot"><div class="leadTop"><div class="name">${esc(leadName(l||{}))}</div><span class="tag">${esc((m.ai_classification||'reply').toUpperCase())}</span></div><div class="summary">${esc(m.ai_summary||m.subject||'Reply received')}</div><div class="meta">Intent ${m.buying_intent??'—'}/100 · ${eventTime(m.received_at||m.created_at)}</div></div>`}).join(''):'<div class="empty">No replies yet.</div>';
-}
-function renderActivity(){
-  const events=[];messages.filter(m=>localDay(m.sent_at||m.received_at||m.created_at)).slice(0,20).forEach(m=>{const l=leads.find(x=>x.id===m.lead_id);events.push({t:m.sent_at||m.received_at||m.created_at,title:m.direction==='outbound'?'Mock email sent':'Reply received',meta:`${leadName(l||{})}${m.ai_classification?' · '+m.ai_classification:''}`})});runs.filter(r=>localDay(r.started_at)).slice(0,8).forEach(r=>events.push({t:r.started_at,title:`Scrape ${r.status||''}`,meta:`${r.leads_inserted||0} new leads` }));events.sort((a,b)=>new Date(b.t)-new Date(a.t));$('activity').innerHTML=events.length?events.slice(0,8).map(e=>`<div class="event"><b>${esc(e.title)}</b><div class="meta">${esc(e.meta)} · ${eventTime(e.t)}</div></div>`).join(''):'<div class="empty">No important activity today.</div>';
-}
-async function approve(id){try{await brain('approve_lead',{id});toast('Approved for SDR');await refreshAll(true)}catch(e){toast(e.message)}}
-async function skipLead(id){try{await brain('skip_lead',{id});toast('Skipped');await refreshAll(true)}catch(e){toast(e.message)}}
-async function reconsider(id){try{await brain('reconsider_lead',{id});toast('Back to review');await refreshAll(true)}catch(e){toast(e.message)}}
-async function startSDR(){try{const cap=+$('cap').value;await brain('sdr_start',{daily_send_cap:cap});toast(`SDR started — cap ${cap}`);await refreshAll(true)}catch(e){toast(e.message)}}
-async function stopSDR(){try{await brain('sdr_stop');toast('SDR stopped');await refreshAll(true)}catch(e){toast(e.message)}}
-async function killSDR(){if(!confirm('KILL SDR now? This immediately disables outbound sending.'))return;try{await brain('sdr_kill');toast('KILL SWITCH engaged');await refreshAll(true)}catch(e){toast(e.message)}}
-async function setMode(mode){if(mode==='auto'&&!confirm('Switch to AUTO? Pending useful leads can be contacted without individual approval when SDR is running.'))return;try{await brain('sdr_mode',{mode});toast(`Mode: ${mode}`);await refreshAll(true)}catch(e){toast(e.message)}}
-async function setCap(){try{await brain('sdr_cap',{daily_send_cap:+$('cap').value});toast('Daily cap updated');await refreshAll(true)}catch(e){toast(e.message)}}
-function parse(v){const m=v.trim().match(/^(.*?)\s+in\s+(.+)$/i);return m?{query:m[1].trim(),location:m[2].trim()}:{query:v.trim(),location:null}}
-async function runSearch(){const v=$('query').value.trim();if(!v)return;const p=parse(v);$('run').disabled=true;try{await brain('search',{...p,max_leads:+$('limit').value,niche_id:$('niche').value});toast('Search queued');await refreshAll(true)}catch(e){toast(e.message)}finally{$('run').disabled=false}}
-seedDemo();refreshAll();
+$('campaignForm').addEventListener('submit',start);
+$('pauseBtn').addEventListener('click',togglePause);
+$('resetBtn').addEventListener('click',reset);
+restore();render();
 </script>
 </body>
 </html>
