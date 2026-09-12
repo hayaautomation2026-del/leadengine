@@ -21,6 +21,8 @@ from email.utils import formataddr
 
 import requests
 
+from conversation_engine import advance, assess
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
@@ -210,6 +212,19 @@ Business: {lead.get('business_name')}
 Reply:
 {body[:6000]}"""
     return extract_json(openai_text(prompt))
+
+
+def preview_conversation_reply(state, message_id, body, approved_offer, *, paused=False):
+    """Phase 1 adapter: returns draft/state only; never sends or writes to Supabase.
+
+Caller supplies saved state and owner-approved offer terms. Deliberately not
+called by main(): Phase 2 requires persistent state, threaded sends and gates.
+"""
+    # Do not call the model for paused, duplicate or human-owned conversations.
+    skip_reader = (paused or message_id in state["processed"]
+                   or state["owner"] == "human" or state["status"] == "stopped")
+    assessment = {} if skip_reader else assess(body, state["history"], openai_text)
+    return advance(state, message_id, body, assessment, approved_offer, paused=paused)
 
 
 def send_email(token, to_email, subject, body):
