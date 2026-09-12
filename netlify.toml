@@ -8,7 +8,12 @@
 
 [[redirects]]
   from = "/start"
-  to = "/start.html"
+  to = "/dashboard.html"
+  status = 200
+
+[[redirects]]
+  from = "/mobile"
+  to = "/dashboard.html"
   status = 200
 
 [[headers]]
