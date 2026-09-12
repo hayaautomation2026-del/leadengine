@@ -64,3 +64,5 @@ jobs:
           SDR_FROM_NAME: ${{ secrets.SDR_FROM_NAME || 'Ameer' }}
           SDR_DRY_RUN: 'true'
         run: python sdr_worker_gemini.py
+
+# Safe test trigger only; SDR_DRY_RUN remains true.
