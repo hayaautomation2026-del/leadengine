@@ -89,14 +89,36 @@ def normalize_website(website):
     return value
 
 
+def decode_cfemail(encoded):
+    """Decode Cloudflare data-cfemail values without guessing addresses."""
+    try:
+        raw = bytes.fromhex(encoded)
+        if len(raw) < 2:
+            return None
+        key = raw[0]
+        decoded = "".join(chr(value ^ key) for value in raw[1:])
+        return decoded if "@" in decoded else None
+    except (ValueError, TypeError):
+        return None
+
+
 def extract_emails(text):
     if not text:
         return []
     text = html.unescape(text)
     found = []
     seen = set()
-    for raw in re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text, re.I):
+
+    candidates = list(re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text, re.I))
+    for encoded in re.findall(r"data-cfemail=[\"']([0-9a-fA-F]+)[\"']", text, re.I):
+        decoded = decode_cfemail(encoded)
+        if decoded:
+            candidates.append(decoded)
+
+    for raw in candidates:
         email = raw.lower().strip(".,;:()[]{}<>\"")
+        if "@" not in email:
+            continue
         domain = email.split("@")[-1]
         if domain in BLOCKED_EMAIL_DOMAINS or email in seen:
             continue
@@ -247,9 +269,20 @@ def run():
             if not name or not phone:
                 skipped += 1
                 continue
-            existing = sb("GET", "leads", params={"select": "id", "phone_number": f"eq.{phone}", "limit": "1"}) or []
+            existing = sb("GET", "leads", params={"select": "id,email,whatsapp_number,website_url", "phone_number": f"eq.{phone}", "limit": "1"}) or []
             if existing:
                 duplicates += 1
+                row = existing[0]
+                website = str(row.get("website_url") or item.get("site") or "").strip() or None
+                if website and (not row.get("email") or not row.get("whatsapp_number")):
+                    email, whatsapp_number = discover_contact_details(website)
+                    patch = {"last_checked_at": now()}
+                    if email and not row.get("email"):
+                        patch["email"] = email
+                        patch["email_source"] = "website"
+                    if whatsapp_number and not row.get("whatsapp_number"):
+                        patch["whatsapp_number"] = whatsapp_number
+                    sb("PATCH", "leads", params={"id": f"eq.{row['id']}"}, body=patch)
                 continue
 
             website = str(item.get("site") or "").strip() or None
@@ -283,7 +316,7 @@ def run():
     except Exception as exc:
         errors.append(f"{type(exc).__name__}: {exc}")
 
-    final_status = "success" if inserted and not errors else ("partial" if inserted else "fail")
+    final_status = "success" if (inserted or duplicates) and not errors else ("partial" if inserted else "fail")
     if run_id:
         sb("PATCH", "scraper_runs", params={"run_id": f"eq.{run_id}"}, body={"finished_at": now(), "leads_fetched": inserted + skipped + duplicates, "leads_inserted": inserted, "leads_skipped": skipped, "duplicates_skipped": duplicates, "error_log": "\n".join(errors) if errors else None, "status": final_status, "engine_used": engine})
 
