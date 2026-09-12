@@ -1,0 +1,52 @@
+name: Deploy dashboard to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - dashboard.html
+      - .github/workflows/dashboard-pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare dashboard only
+        shell: bash
+        run: |
+          mkdir -p _site/dashboard _site/mobile _site/start
+          cp dashboard.html _site/index.html
+          cp dashboard.html _site/dashboard.html
+          for route in dashboard mobile start; do
+            cp dashboard.html "_site/$route/index.html"
+          done
+          touch _site/.nojekyll
+          test "$(find _site -type f | wc -l)" -eq 6
+          for page in _site/index.html _site/dashboard.html _site/dashboard/index.html _site/mobile/index.html _site/start/index.html; do
+            cmp dashboard.html "$page"
+          done
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload dashboard
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Publish dashboard
+        id: deployment
+        uses: actions/deploy-pages@v4
