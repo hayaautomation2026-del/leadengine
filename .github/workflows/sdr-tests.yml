@@ -22,5 +22,7 @@ jobs:
           python-version: '3.12'
       - name: Install test dependency
         run: python -m pip install requests
-      - name: Run SDR safety tests
-        run: python -m unittest -v
+      - name: Test follow-up and handoff engine
+        run: python -m unittest -v test_followup_engine.py
+      - name: Test owner control gate
+        run: python -m unittest -v test_sdr_control_gate.py
