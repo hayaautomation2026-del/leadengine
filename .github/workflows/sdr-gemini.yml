@@ -13,7 +13,7 @@ on:
 
 concurrency:
   group: leadengine-sdr-gemini
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   sdr:
