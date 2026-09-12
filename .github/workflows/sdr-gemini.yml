@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/sdr-gemini.yml'
+      - 'sdr_worker.py'
+      - 'sdr_worker_gemini.py'
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
@@ -60,9 +62,8 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: gemini-3.7-flash
           GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
           SDR_FROM_NAME: ${{ secrets.SDR_FROM_NAME || 'Ameer' }}
           SDR_DRY_RUN: 'true'
         run: python sdr_worker_gemini.py
-
-# Safe test trigger only; SDR_DRY_RUN remains true.
