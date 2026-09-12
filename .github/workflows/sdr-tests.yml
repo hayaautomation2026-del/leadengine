@@ -6,6 +6,8 @@ on:
     paths:
       - 'sdr_worker.py'
       - 'sdr_worker_gemini.py'
+      - 'inbox_conversation.py'
+      - 'test_inbox_conversation.py'
       - 'conversation_engine.py'
       - 'demo_conversations.py'
       - 'test_conversation_engine.py'
@@ -34,6 +36,8 @@ jobs:
         run: python -m unittest -v test_sdr_control_gate.py
       - name: Test conversation decisions and preview adapter
         run: python -m unittest -v test_conversation_engine.py test_conversation_adapter.py
+      - name: Test bounded real-email conversation adapter
+        run: python -m unittest -v test_inbox_conversation.py
       - name: Check demo examples match conversation engine
         run: |
           python demo_conversations.py

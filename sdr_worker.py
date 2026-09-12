@@ -540,6 +540,10 @@ def main():
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise RuntimeError("Missing SUPABASE_URL or SUPABASE_KEY")
     token = gmail_token()
+    test_check_id = os.environ.get("INBOX_TEST_CHECK_ID")
+    if test_check_id:
+        from inbox_conversation import run_test_conversation
+        run_test_conversation(test_check_id, token=token)
     process_replies(token)
     process_followups(token)
     send_batch(token)

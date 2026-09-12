@@ -1,0 +1,36 @@
+name: Controlled AI reply test
+on:
+  push:
+    branches: [main]
+    paths: ['inbox_conversation.py', '.github/workflows/inbox-conversation.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: leadengine-sdr-gemini
+  cancel-in-progress: false
+jobs:
+  reply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests==2.31.0
+      - name: Test controlled reply safeguards
+        run: python -m unittest -q test_inbox_conversation
+      - name: Respond only inside the authorized test thread
+        env:
+          INBOX_CHECK_ID: d2d77c87-ec8a-4878-a5dd-e6e9509a257b
+          SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: gemini-3.8-flash
+          GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
+          SDR_FROM_NAME: Ameer
+        run: python inbox_conversation.py

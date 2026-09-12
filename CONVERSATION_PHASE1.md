@@ -34,7 +34,7 @@ git diff --exit-code -- dashboard.html
 
 ## Before Phase 2
 
-The scheduled worker's live path is unchanged. `preview_conversation_reply` is
+A bounded owner-inbox test now uses the engine through a separate worker; see INBOX_CONVERSATION_TEST.md. General prospect reply handling remains unchanged. `preview_conversation_reply` is
 not called from `main()` and the browser buttons do not control the real worker.
 There are no new schema changes or live settings changes in this phase.
 

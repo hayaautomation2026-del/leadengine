@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: leadengine-sdr-gemini
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   sdr:
@@ -60,4 +60,5 @@ jobs:
           GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
           SDR_FROM_NAME: ${{ secrets.SDR_FROM_NAME || 'Ameer' }}
           SDR_DRY_RUN: 'false'
+          INBOX_TEST_CHECK_ID: d2d77c87-ec8a-4878-a5dd-e6e9509a257b
         run: python sdr_worker_gemini.py
