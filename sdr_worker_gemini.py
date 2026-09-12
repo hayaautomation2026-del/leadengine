@@ -1,6 +1,10 @@
 """Gemini adapter for the existing LeadEngine SDR worker.
 
 Keeps Gmail/Supabase logic unchanged while replacing the AI provider with Gemini.
+Adds the owner-control gate used by the responsive dashboard:
+- OFF/KILL: no outbound drafting or sending
+- MANUAL: only leads explicitly marked approved can receive first-touch outreach
+- AUTO: pending or approved contact-ready leads may be processed
 """
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ import requests
 import sdr_worker
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.7-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 
 
 def gemini_text(prompt: str) -> str:
@@ -61,7 +65,56 @@ def gemini_text(prompt: str) -> str:
     raise RuntimeError(last_error or "Gemini request failed")
 
 
+ORIGINAL_SB = sdr_worker.sb
+ORIGINAL_FOLLOWUPS = sdr_worker.process_followups
+
+
+def control_settings():
+    return (ORIGINAL_SB(
+        "GET",
+        "sdr_settings",
+        params={"select": "*", "id": "eq.true", "limit": "1"},
+    ) or [{}])[0]
+
+
+def outbound_allowed(settings):
+    return bool(settings.get("sending_enabled")) and not bool(settings.get("kill_switch"))
+
+
+def controlled_sb(method, path, *, params=None, body=None, prefer=None):
+    """Apply approval-mode filtering to the existing first-touch lead query."""
+    if method == "GET" and path == "leads" and params and params.get("outreach_status") == "eq.pending":
+        settings = control_settings()
+        if not outbound_allowed(settings):
+            return []
+
+        filtered = dict(params)
+        mode = str(settings.get("approval_mode") or "manual").lower()
+        filtered["outreach_status"] = "eq.approved" if mode == "manual" else "in.(pending,approved)"
+
+        min_score = settings.get("min_pain_score")
+        if min_score is not None:
+            try:
+                filtered["pain_score"] = f"gte.{int(min_score)}"
+            except (TypeError, ValueError):
+                pass
+
+        return ORIGINAL_SB(method, path, params=filtered, body=body, prefer=prefer)
+
+    return ORIGINAL_SB(method, path, params=params, body=body, prefer=prefer)
+
+
+def controlled_followups(token):
+    settings = control_settings()
+    if not outbound_allowed(settings):
+        print("SDR follow-ups paused by owner control")
+        return
+    return ORIGINAL_FOLLOWUPS(token)
+
+
 sdr_worker.openai_text = gemini_text
+sdr_worker.sb = controlled_sb
+sdr_worker.process_followups = controlled_followups
 
 
 if __name__ == "__main__":
