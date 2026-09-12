@@ -161,5 +161,9 @@ class ControlledReplyTests(unittest.TestCase):
         m = message("What is included?\n\nOn Saturday, Ameer wrote:\n> Old content")
         self.assertEqual(flow.latest_text(m), "What is included?")
 
+    def test_wrapped_gmail_quote_header_is_removed(self):
+        m = message("Yes, I am interested.\n\nOn Sat, Sep 12, Ameer <sender@example.com>\nwrote:\n> Original test")
+        self.assertEqual(flow.latest_text(m), "Yes, I am interested.")
+
 
 if __name__ == "__main__": unittest.main()

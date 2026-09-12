@@ -38,7 +38,7 @@ def allowed(config, settings):
 def latest_text(message):
     text = worker.extract_text(message.get("payload", {})).strip()
     # Trim common quoted history before sending the current reply to the model.
-    text = re.split(r"(?im)^On .{0,500}wrote:\s*$|^-{2,}\s*Original Message\s*-{2,}$", text, maxsplit=1)[0]
+    text = re.split(r"(?im)^On [^\n]*(?:\n[^\n]*){0,2}wrote:\s*$|^-{2,}\s*Original Message\s*-{2,}$", text, maxsplit=1)[0]
     return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))[:6000].strip()
 
 
