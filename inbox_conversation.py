@@ -61,9 +61,18 @@ def model_reader(prompt):
         headers={"x-goog-api-key": key}, json={"contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}, timeout=60)
     if not response.ok:
+        print(f"TEST_AI_READ_FAILURE http_status={response.status_code}")
         raise RuntimeError(f"AI HTTP {response.status_code}")
-    return "".join(part.get("text", "") for candidate in response.json().get("candidates", [])
+    text = "".join(part.get("text", "") for candidate in response.json().get("candidates", [])
                    for part in candidate.get("content", {}).get("parts", []))
+    try:
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            raise ValueError("Expected a JSON object")
+    except ValueError:
+        print("TEST_AI_READ_FAILURE invalid_structured_response")
+        raise RuntimeError("AI response was not a JSON object") from None
+    return text
 
 
 def reply_payload(check, message, body):

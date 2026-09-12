@@ -2,7 +2,7 @@ name: Controlled AI reply test
 on:
   push:
     branches: [main]
-    paths: ['inbox_conversation.py', '.github/workflows/inbox-conversation.yml']
+    paths: ['inbox_conversation.py', 'conversation_engine.py', 'test_inbox_conversation.py', '.github/workflows/inbox-conversation.yml']
   workflow_dispatch:
 permissions:
   contents: read

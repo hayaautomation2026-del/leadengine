@@ -134,6 +134,29 @@ class ConversationTests(unittest.TestCase):
         self.step(state=s)
         self.assertEqual(s, new_conversation())
 
+    def test_identity_question_uses_approved_identity_without_model(self):
+        def unavailable_model(_):
+            self.fail("A basic identity answer must not depend on the model")
+        a = assess("Who are you?", [], unavailable_model)
+        _, d = advance(new_conversation(), "identity1", "Who are you?", a,
+                       {"identity_text": "I am Ameer's AI assistant for this test."})
+        self.assertEqual(d["action"], "draft")
+        self.assertEqual(d["body"], "I am Ameer's AI assistant for this test.")
+        self.assertEqual(d["facts"], {})
+
+    def test_identity_is_never_invented(self):
+        a = assess("Who is this?", [], lambda _: "")
+        _, d = advance(new_conversation(), "identity2", "Who is this?", a, {})
+        self.assertEqual(d["action"], "handoff")
+        self.assertEqual(d["body"], "")
+
+    def test_identity_with_stop_request_still_stops(self):
+        text = "Who are you? Stop contacting me."
+        _, d = advance(new_conversation(), "identity3", text,
+                       {"intent": "identity", "intent_evidence": "Who are you?"},
+                       {"identity_text": "I am an AI assistant."})
+        self.assertEqual(d["action"], "stop")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -161,6 +161,16 @@ class ControlledReplyTests(unittest.TestCase):
         m = message("What is included?\n\nOn Saturday, Ameer wrote:\n> Old content")
         self.assertEqual(flow.latest_text(m), "What is included?")
 
+    def test_real_identity_question_sends_once_without_ai_dependency(self):
+        self.thread["messages"] = [message("Who are you?")]
+        self.config["offer"]["identity_text"] = "I am Ameer's AI assistant for this test."
+        self.ai_failure = True
+        self.run_flow()
+        self.run_flow()
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.config["last_decision"]["body"], self.config["offer"]["identity_text"])
+        self.mocks[-1].assert_not_called()
+
     def test_wrapped_gmail_quote_header_is_removed(self):
         m = message("Yes, I am interested.\n\nOn Sat, Sep 12, Ameer <sender@example.com>\nwrote:\n> Original test")
         self.assertEqual(flow.latest_text(m), "Yes, I am interested.")
