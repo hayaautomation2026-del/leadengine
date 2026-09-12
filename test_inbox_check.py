@@ -63,4 +63,27 @@ class InboxCheckTests(unittest.TestCase):
         self.mocks[-1].assert_not_called()
 
 
+class InspectionTests(unittest.TestCase):
+    def test_inspection_uses_only_get_and_never_sends(self):
+        row = {"gmail_message_id": "m1", "recipient": "owner@example.com",
+               "expected_sender": "sdr@example.com", "subject": "Test"}
+        def db(method, *args, **kwargs):
+            self.assertEqual(method, "GET")
+            return [row]
+        def gmail(token, method, path, **kwargs):
+            self.assertEqual(method, "GET")
+            if path == "messages/m1":
+                return {"id": "m1", "labelIds": ["SENT"], "payload": {"headers": [
+                    {"name": "To", "value": "owner@example.com"},
+                    {"name": "From", "value": "sdr@example.com"},
+                    {"name": "Subject", "value": "Test"}]}}
+            return {"messages": [{"id": "reply1", "payload": {"mimeType": "text/plain", "body": {"data": "SW50ZXJlc3RlZA"}, "headers": [
+                {"name": "From", "value": "owner@example.com"}, {"name": "To", "value": "sdr@example.com"}]}}]}
+        with patch.object(inbox_check.worker, "sb", side_effect=db), \
+             patch.object(inbox_check.worker, "gmail_api", side_effect=gmail), \
+             patch.object(inbox_check.worker, "gmail_token", return_value="fake"), \
+             patch.object(inbox_check.worker, "send_email", side_effect=AssertionError("Must not send")):
+            inbox_check.inspect_check(CHECK_ID)
+
+
 if __name__ == "__main__": unittest.main()

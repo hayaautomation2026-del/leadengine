@@ -6,6 +6,9 @@ requires manual review; reruns never blindly resend an uncertain message.
 """
 import os
 import re
+import json
+import sys
+from email.utils import parseaddr
 from uuid import UUID
 
 import sdr_worker as worker
@@ -58,5 +61,43 @@ def run_check(check_id):
         raise RuntimeError("Inbox check needs review; automatic resend is disabled") from None
 
 
+def inspect_check(check_id):
+    """Read the exact sent message and targeted delivery failures; never send."""
+    UUID(check_id)
+    rows = worker.sb("GET", "sdr_inbox_checks", params={"id": f"eq.{check_id}", "limit": "1"}) or []
+    if not rows or not rows[0].get("gmail_message_id"):
+        print("No recorded Gmail message to inspect.")
+        return
+    row = rows[0]
+    if not valid_email(row["recipient"]):
+        raise ValueError("Invalid test recipient")
+    token = worker.gmail_token()
+    msg = worker.gmail_api(token, "GET", "messages/" + row["gmail_message_id"],
+        params={"format": "metadata", "metadataHeaders": ["To", "From", "Subject"]})
+    headers = msg.get("payload", {}).get("headers", [])
+    report = {"message_found": msg.get("id") == row["gmail_message_id"],
+              "in_sent": "SENT" in msg.get("labelIds", []),
+              "recipient_matches": parseaddr(worker.header_value(headers, "To"))[1].lower() == row["recipient"].lower(),
+              "sender_matches": parseaddr(worker.header_value(headers, "From"))[1].lower() == row["expected_sender"].lower(),
+              "subject_matches": worker.header_value(headers, "Subject") == row["subject"]}
+    thread = worker.gmail_api(token, "GET", "threads/" + (row.get("gmail_thread_id") or row["gmail_message_id"]), params={"format": "full"})
+    replies = []
+    for reply in thread.get("messages", []):
+        reply_headers = reply.get("payload", {}).get("headers", [])
+        from_email = parseaddr(worker.header_value(reply_headers, "From"))[1].lower()
+        to_email = parseaddr(worker.header_value(reply_headers, "To"))[1].lower()
+        if from_email == row["recipient"].lower() and to_email == row["expected_sender"].lower():
+            replies.append({"message_id": reply["id"],
+                            "readable_body": bool(worker.extract_text(reply.get("payload", {})).strip())})
+    report["matched_customer_replies"] = len(replies)
+    report["reply_details"] = replies
+    print("INBOX_CHECK_DIAGNOSTIC " + json.dumps(report))
+
+
 if __name__ == "__main__":
-    run_check(os.environ["INBOX_CHECK_ID"])
+    if sys.argv[1:] == ["--inspect"]:
+        inspect_check(os.environ["INBOX_CHECK_ID"])
+    elif not sys.argv[1:]:
+        run_check(os.environ["INBOX_CHECK_ID"])
+    else:
+        raise SystemExit("Unknown command")
