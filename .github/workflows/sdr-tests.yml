@@ -6,6 +6,12 @@ on:
     paths:
       - 'sdr_worker.py'
       - 'sdr_worker_gemini.py'
+      - 'conversation_engine.py'
+      - 'demo_conversations.py'
+      - 'test_conversation_engine.py'
+      - 'test_conversation_adapter.py'
+      - 'test_conversation_dashboard.cjs'
+      - 'dashboard.html'
       - 'test_followup_engine.py'
       - 'test_sdr_control_gate.py'
       - '.github/workflows/sdr-tests.yml'
@@ -26,3 +32,16 @@ jobs:
         run: python -m unittest -v test_followup_engine.py
       - name: Test owner control gate
         run: python -m unittest -v test_sdr_control_gate.py
+      - name: Test conversation decisions and preview adapter
+        run: python -m unittest -v test_conversation_engine.py test_conversation_adapter.py
+      - name: Check demo examples match conversation engine
+        run: |
+          python demo_conversations.py
+          git diff --exit-code -- dashboard.html
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test dashboard conversation controls
+        run: |
+          npm install --prefix "$RUNNER_TEMP/conversation-ui" jsdom@30.0.1 --no-audit --no-fund
+          NODE_PATH="$RUNNER_TEMP/conversation-ui/node_modules" node test_conversation_dashboard.cjs
