@@ -6,9 +6,11 @@ public.leads and associates every lead/run with the selected niche.
 from __future__ import annotations
 
 import hashlib
+import html
 import os
 import re
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -23,6 +25,32 @@ from scraper import (
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 SEARCH_REQUEST = (os.environ.get("SEARCH_REQUEST") or "").strip()
+
+CONTACT_PATH_HINTS = (
+    "/contact",
+    "/contact-us",
+    "/about",
+    "/about-us",
+    "/team",
+    "/staff",
+)
+
+CONTACT_LINK_WORDS = (
+    "contact",
+    "about",
+    "team",
+    "staff",
+    "support",
+    "reach-us",
+    "get-in-touch",
+)
+
+BLOCKED_EMAIL_DOMAINS = {
+    "example.com",
+    "example.org",
+    "sentry.io",
+    "wixpress.com",
+}
 
 
 def now():
@@ -50,29 +78,132 @@ def clean_phone(value):
     return value[:30] if len(value) >= 7 else None
 
 
-def find_public_email(website):
-    """Best-effort public email discovery from the business homepage.
-
-    This is intentionally conservative: it only records an address visibly
-    present in the fetched page and never guesses an email address.
-    """
+def normalize_website(website):
     if not website:
         return None
-    try:
-        url = website if website.startswith("http") else f"https://{website}"
-        r = requests.get(url, timeout=12, headers={"User-Agent": "LeadEngine/1.0"})
-        if not r.ok:
-            return None
-        text = r.text[:800_000]
-        matches = re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text, re.I)
-        blocked = {"example.com", "example.org", "sentry.io", "wixpress.com"}
-        for raw in matches:
-            email = raw.lower().strip(".,;:()[]{}<>\"")
-            if email.split("@")[-1] not in blocked:
-                return email
-    except requests.RequestException:
+    value = str(website).strip()
+    if not value:
         return None
+    if not value.startswith(("http://", "https://")):
+        value = f"https://{value}"
+    return value
+
+
+def extract_emails(text):
+    if not text:
+        return []
+    text = html.unescape(text)
+    found = []
+    seen = set()
+    for raw in re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text, re.I):
+        email = raw.lower().strip(".,;:()[]{}<>\"")
+        domain = email.split("@")[-1]
+        if domain in BLOCKED_EMAIL_DOMAINS or email in seen:
+            continue
+        seen.add(email)
+        found.append(email)
+    return found
+
+
+def extract_whatsapp_number(text):
+    """Return a WhatsApp number only when the website explicitly exposes one."""
+    if not text:
+        return None
+    decoded = html.unescape(text)
+    patterns = (
+        r"https?://wa\.me/([+\d][\d\s().-]{6,25})",
+        r"https?://api\.whatsapp\.com/send\?[^\"'<>\s]*phone=([+\d][\d\s().-]{6,25})",
+        r"https?://(?:www\.)?whatsapp\.com/send\?[^\"'<>\s]*phone=([+\d][\d\s().-]{6,25})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, decoded, re.I)
+        if match:
+            return clean_phone(match.group(1))
     return None
+
+
+def discover_contact_details(website):
+    """Best-effort public contact discovery from a business website.
+
+    Checks the homepage plus a small set of likely contact/about/team pages.
+    It never guesses email addresses or assumes a normal phone is WhatsApp.
+    """
+    base_url = normalize_website(website)
+    if not base_url:
+        return None, None
+
+    parsed_base = urlparse(base_url)
+    base_host = parsed_base.netloc.lower().removeprefix("www.")
+    queue = [base_url]
+    queued = {base_url}
+
+    for path in CONTACT_PATH_HINTS:
+        candidate = urljoin(base_url, path)
+        if candidate not in queued:
+            queue.append(candidate)
+            queued.add(candidate)
+
+    emails = []
+    seen_emails = set()
+    whatsapp_number = None
+
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (compatible; LeadEngine/1.0; +https://github.com/hayaautomation2026-del/leadengine)"
+    })
+
+    visited = set()
+    while queue and len(visited) < 8:
+        url = queue.pop(0)
+        if url in visited:
+            continue
+        visited.add(url)
+
+        try:
+            r = session.get(url, timeout=12, allow_redirects=True)
+        except requests.RequestException:
+            continue
+
+        if not r.ok:
+            continue
+
+        content_type = (r.headers.get("content-type") or "").lower()
+        if "text/html" not in content_type and content_type:
+            continue
+
+        text = r.text[:1_000_000]
+
+        for email in extract_emails(text):
+            if email not in seen_emails:
+                seen_emails.add(email)
+                emails.append(email)
+
+        if not whatsapp_number:
+            whatsapp_number = extract_whatsapp_number(text)
+
+        for href in re.findall(r"href\s*=\s*[\"']([^\"']+)[\"']", text, re.I):
+            href = html.unescape(href).strip()
+            if not href or href.startswith(("javascript:", "tel:", "mailto:", "#")):
+                continue
+            absolute = urljoin(r.url, href)
+            parsed = urlparse(absolute)
+            host = parsed.netloc.lower().removeprefix("www.")
+            path_lower = parsed.path.lower()
+            if host != base_host:
+                continue
+            if not any(word in path_lower for word in CONTACT_LINK_WORDS):
+                continue
+            clean = absolute.split("#", 1)[0]
+            if clean not in queued and clean not in visited:
+                queue.append(clean)
+                queued.add(clean)
+
+    preferred = None
+    if emails:
+        generic_prefixes = ("info@", "contact@", "hello@", "sales@", "office@", "admin@")
+        preferred = next((e for e in emails if e.startswith(generic_prefixes)), emails[0])
+
+    return preferred, whatsapp_number
 
 
 def fingerprint(name, phone):
@@ -123,7 +254,7 @@ def run():
 
             website = str(item.get("site") or "").strip() or None
             signals = check_website(website)
-            email = find_public_email(website)
+            email, whatsapp_number = discover_contact_details(website)
             lead = {
                 "niche_id": req["niche_id"],
                 "full_name": name,
@@ -131,7 +262,7 @@ def run():
                 "phone_number": phone,
                 "email": email,
                 "email_source": "website" if email else None,
-                "whatsapp_number": phone if ("+971" in phone or phone.startswith("971")) else None,
+                "whatsapp_number": whatsapp_number,
                 "website_url": website,
                 "google_maps_url": item.get("url"),
                 "address": str(item.get("address") or "")[:500],
