@@ -1,4 +1,5 @@
 name: LeadEngine Finder Worker
+# test trigger: contact-enrichment verification
 
 on:
   push:
