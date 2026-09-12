@@ -5,6 +5,9 @@ Keeps Gmail/Supabase logic unchanged while replacing the AI provider with Gemini
 from __future__ import annotations
 
 import os
+import random
+import time
+
 import requests
 
 import sdr_worker
@@ -16,27 +19,46 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.7-flash")
 def gemini_text(prompt: str) -> str:
     if not GEMINI_API_KEY:
         raise RuntimeError("Missing GEMINI_API_KEY")
+
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    response = requests.post(
-        url,
-        params={"key": GEMINI_API_KEY},
-        headers={"Content-Type": "application/json"},
-        json={"contents": [{"parts": [{"text": prompt}]}]},
-        timeout=90,
-    )
-    if not response.ok:
-        raise RuntimeError(f"Gemini failed {response.status_code}: {response.text[:700]}")
-    data = response.json()
-    parts = []
-    for candidate in data.get("candidates", []):
-        content = candidate.get("content", {})
-        for part in content.get("parts", []):
-            if part.get("text"):
-                parts.append(part["text"])
-    text = "\n".join(parts).strip()
-    if not text:
-        raise RuntimeError("Gemini returned no text")
-    return text
+    last_error = None
+
+    for attempt in range(5):
+        try:
+            response = requests.post(
+                url,
+                params={"key": GEMINI_API_KEY},
+                headers={"Content-Type": "application/json"},
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+                timeout=90,
+            )
+        except requests.RequestException as exc:
+            last_error = f"Gemini request error: {exc}"
+            if attempt == 4:
+                raise RuntimeError(last_error) from exc
+            time.sleep((2 ** attempt) + random.uniform(0, 1))
+            continue
+
+        if response.ok:
+            data = response.json()
+            parts = []
+            for candidate in data.get("candidates", []):
+                content = candidate.get("content", {})
+                for part in content.get("parts", []):
+                    if part.get("text"):
+                        parts.append(part["text"])
+            text = "\n".join(parts).strip()
+            if not text:
+                raise RuntimeError("Gemini returned no text")
+            return text
+
+        last_error = f"Gemini failed {response.status_code}: {response.text[:700]}"
+        if response.status_code not in {429, 500, 502, 503, 504} or attempt == 4:
+            raise RuntimeError(last_error)
+
+        time.sleep((2 ** attempt) + random.uniform(0, 1))
+
+    raise RuntimeError(last_error or "Gemini request failed")
 
 
 sdr_worker.openai_text = gemini_text
