@@ -1,6 +1,10 @@
 name: LeadEngine SDR - Gemini
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sdr-gemini.yml'
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
