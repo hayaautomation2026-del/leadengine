@@ -1,7 +1,7 @@
 """Niche-aware worker for LeadEngine.
 
 Reuses the existing free-first Maps engines from scraper.py, but writes into
-public.leads and associates every lead/run with the selected niche.
+public.leads and associates every lead with the selected niche.
 """
 from __future__ import annotations
 
@@ -227,7 +227,7 @@ def run():
         raise RuntimeError("Search request has no niche_id")
 
     sb("PATCH", "search_requests", params={"id": f"eq.{req['id']}"}, body={"status": "running", "started_at": now()})
-    run_rows = sb("POST", "scraper_runs", body={"status": "running", "started_at": now(), "search_request_id": req["id"], "provider": "free_multi_scraper", "niche_id": req["niche_id"]}, prefer="return=representation") or []
+    run_rows = sb("POST", "scraper_runs", body={"status": "running", "started_at": now(), "search_request_id": req["id"], "provider": "free_multi_scraper"}, prefer="return=representation") or []
     run_id = run_rows[0]["run_id"] if run_rows else None
 
     query = str(req.get("query") or "").strip()
