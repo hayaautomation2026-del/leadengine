@@ -1,5 +1,7 @@
 """Backfill public contact details for LeadEngine leads missing email."""
 
+import time
+
 from niche_worker import SUPABASE_KEY, SUPABASE_URL, discover_contact_details, now, sb
 
 PLACEHOLDER_DOMAINS = {
@@ -37,23 +39,29 @@ def clean_placeholders():
     return removed
 
 
+def get_missing_email_rows(limit):
+    params = {
+        "select": "id,business_name,website_url,email,whatsapp_number",
+        "email": "is.null",
+        "website_url": "not.is.null",
+        "limit": str(limit),
+    }
+    for attempt in range(3):
+        try:
+            return sb("GET", "leads", params=params) or []
+        except RuntimeError as exc:
+            if "504" not in str(exc) or attempt == 2:
+                raise
+            time.sleep(2 * (attempt + 1))
+    return []
+
+
 def run(limit=30):
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise RuntimeError("SUPABASE_URL and SUPABASE_KEY are required")
 
     placeholders_removed = clean_placeholders()
-
-    rows = sb(
-        "GET",
-        "leads",
-        params={
-            "select": "id,business_name,website_url,email,whatsapp_number",
-            "email": "is.null",
-            "website_url": "not.is.null",
-            "order": "created_at.desc",
-            "limit": str(limit),
-        },
-    ) or []
+    rows = get_missing_email_rows(limit)
 
     checked = email_found = whatsapp_found = updated = 0
 
