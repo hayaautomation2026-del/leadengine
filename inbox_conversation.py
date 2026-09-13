@@ -167,6 +167,7 @@ def run_test_conversation(check_id, token=None):
         message = "\n".join(latest_text(m) for m in pending)
         assessment = {} if STOP.search(message) else assess(message, state["history"], model_reader, config["offer"])
         next_state, decision = advance(state, newest["id"], message, assessment, config["offer"])
+        decision["assessment"] = assessment  # Private database only; never public logs.
         next_state["processed"] = list(dict.fromkeys(next_state["processed"] + [m["id"] for m in pending]))
         if decision["action"] == "wait" and next_state["status"] == "active":
             save({"state": next_state, "last_decision": decision, "status": "active"}, "processing")
