@@ -39,4 +39,5 @@ jobs:
           GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
           SDR_FROM_NAME: Ameer
         run: |
+          python diagnose_reply.py
           python inbox_conversation.py
