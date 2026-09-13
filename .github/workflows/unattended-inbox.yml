@@ -4,17 +4,17 @@ on:
     branches: [main]
     paths: ['unattended_inbox.py', 'response_audit.py', '.github/workflows/unattended-inbox.yml']
   schedule:
-    - cron: '3-59/5 * * * *'
+    - cron: '13 * * * *'
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: leadengine-sdr-gemini
+  group: leadengine-unattended-owner
   cancel-in-progress: false
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 310
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

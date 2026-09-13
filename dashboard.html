@@ -1,166 +1,40 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src data:; form-action 'none'; base-uri 'none'">
-<meta name="theme-color" content="#122b2b">
-<title>LeadEngine — Your SDR</title>
-<style>
-:root{--ink:#122b2b;--muted:#526764;--bg:#f5f6f0;--paper:#fff;--line:#d9e1d8;--green:#d7f87a;--deep:#214b40;--soft:#edf3e8}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,Helvetica,sans-serif;font-size:17px;line-height:1.55}button,input,select{font:inherit}button{cursor:pointer}button:disabled{cursor:default;opacity:.5}[hidden]{display:none!important}:focus-visible{outline:3px solid #247cbb;outline-offset:4px}h1,h2,h3,p{margin:0}h1{font-size:clamp(30px,4vw,49px);line-height:1.13;letter-spacing:-1.5px;font-weight:700}h2{font-size:23px;line-height:1.25}h3{font-size:19px}.muted{color:var(--muted)}.small{font-size:14px}.eyebrow{font-size:12px;letter-spacing:1.5px;font-weight:700;text-transform:uppercase;color:var(--deep);margin-bottom:12px}.shell{max-width:1160px;margin:0 auto;padding:0 26px 40px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:25px 0;border-bottom:1px solid var(--line)}.brand{font-size:24px;font-weight:800;letter-spacing:-1px}.brand span{background:var(--ink);color:var(--green);padding:4px 9px;margin-right:8px;border-radius:9px}.badge{font-size:12px;font-weight:bold;padding:6px 11px;background:#e7edde;border:1px solid #ced9c1;border-radius:30px;white-space:nowrap}.safe{font-size:14px;padding:13px 0;color:var(--muted)}.hero{display:flex;align-items:center;justify-content:space-between;gap:25px;padding:30px 0}.hero p{max-width:530px;margin-top:14px}.hero-note{max-width:225px;padding-left:20px;border-left:2px solid #bacdad;font-size:15px}.layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}.card{background:var(--paper);border:1px solid var(--line);border-radius:19px;padding:25px}.form-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}.field{display:block;margin:0 0 18px}.field>span{display:block;font-weight:700;font-size:15px;margin-bottom:7px}.field input,.field select{width:100%;border:1px solid #bbc9c0;background:#fafcf8;border-radius:10px;padding:12px;color:var(--ink);min-height:49px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.primary,.secondary,.textbtn{border-radius:10px;padding:12px 18px;min-height:46px;font-weight:bold;border:1px solid transparent}.primary{background:var(--ink);color:var(--green)}.primary:hover{background:#21443f}.secondary{background:#fff;border-color:#b7c6bc;color:var(--ink)}.textbtn{background:transparent;color:var(--deep);text-decoration:underline;padding:7px 3px;font-size:14px}.wide{width:100%}.form-foot{margin-top:11px;text-align:center;font-size:13px;color:var(--muted)}.responsibilities{background:var(--soft)}.responsibilities ul{padding-left:20px;margin:15px 0 24px}.responsibilities li{margin:9px 0;font-size:15px}.responsibilities p{font-size:15px}.divider{height:1px;background:var(--line);margin:18px 0}.error{color:#9c3029;font-size:14px;margin-bottom:10px}.campaign{font-size:14px;color:var(--muted);margin-bottom:17px;overflow-wrap:anywhere}.statusbox{background:var(--ink);border-radius:17px;color:#fff;padding:25px}.statusline{display:flex;justify-content:space-between;gap:14px;align-items:center}.statusbox .eyebrow{color:var(--green)}.statusbox h2{font-size:27px}.statusbox p{color:#d2dfd7;font-size:15px;margin-top:8px}.statusbox .secondary{background:transparent;color:#fff;border-color:#718b7c}.track{height:6px;background:#486259;border-radius:10px;overflow:hidden;margin-top:23px}.fill{height:100%;background:var(--green);transition:width .4s}.progress-caption{margin-top:9px;font-size:12px;color:#d2dfd7}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0 25px}.stat{border:1px solid var(--line);background:#fff;border-radius:13px;padding:16px}.stat strong{font-size:29px;display:block;line-height:1.2}.stat span{font-size:13px;color:var(--muted)}.sectionhead{display:flex;justify-content:space-between;align-items:center;margin:0 0 14px}.empty{border:1px dashed #b9c8b9;border-radius:16px;padding:28px;text-align:center;background:#f9fbf6}.empty p{font-size:15px;margin-top:8px}.opportunity{margin-bottom:12px;padding:21px;background:#fff;border:1px solid var(--line);border-radius:15px}.opphead{display:flex;justify-content:space-between;gap:12px;align-items:start}.opportunity p{font-size:15px;margin:10px 0}.tags{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0 17px}.tag{font-size:12px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:#f5f8f1}.pill{color:#2c542b;background:#e4f4ce;border-radius:25px;padding:4px 9px;font-size:12px;font-weight:700;white-space:nowrap}.brief{border-top:1px solid var(--line);padding-top:16px;margin-top:15px}.brief ol{padding-left:22px;font-size:15px}.quote{border-left:3px solid #b9d67d;padding-left:12px}.conversation-actions{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}.brief .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.timeline{padding-left:20px;font-size:14px}.timeline li{margin:12px 0;color:var(--muted)}.timeline li.done{color:var(--ink)}details{border:1px solid var(--line);border-radius:12px;background:#fff;margin-top:16px;padding:15px}summary{cursor:pointer;font-weight:bold;font-size:15px}footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);margin-top:30px;padding-top:16px;display:flex;justify-content:space-between;gap:20px}.phase{display:flex;justify-content:space-between;padding:9px 0;font-size:14px}.phase em{font-style:normal;color:var(--muted);font-size:12px}.done-state{border-color:#c5d7b4}.notice{margin-top:12px;font-size:13px;color:var(--muted)}
-@media(max-width:760px){.shell{padding:0 16px 28px}.top{padding:17px 0}.hero{padding:22px 0}.hero-note{display:none}.layout{grid-template-columns:1fr}.card{padding:21px}.responsibilities{order:2}.hero h1{font-size:34px}.stats{gap:8px}.stat{padding:12px}.statusbox{padding:20px}.statusline{align-items:flex-start}.statusbox h2{font-size:24px}.badge{font-size:11px}.two{grid-template-columns:1fr;gap:0}footer{flex-direction:column;gap:7px}.opphead{flex-direction:column;gap:6px}.brand{font-size:21px}}
-@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
-</style>
-</head>
-<body>
-<div class="shell">
-<header class="top"><div class="brand"><span>↗</span>LeadEngine</div><span class="badge">PHASE 1 · DEMO</span></header>
-<div class="safe">Fictional businesses. No real emails. No live data access.</div>
-<section class="hero"><div><div class="eyebrow">Your sales development assistant</div><h1>Your SDR works.<br>You close.</h1><p class="muted">Set the direction once. Your SDR finds prospects, follows up, and brings you the interested ones.</p></div><div class="hero-note"><strong>Less managing.<br>More conversations.</strong><p class="small muted">This demo shows the workflow in about 20 seconds.</p></div></section>
-<div class="layout">
-<main>
-<section id="setup" class="card">
-<div class="form-title"><h2>What are we selling?</h2><span class="badge">Set once</span></div>
-<form id="campaignForm">
-<label class="field" for="offer"><span>Your service</span><input id="offer" maxlength="120" required value="Social media content packages" autocomplete="off"></label>
-<div class="two"><label class="field" for="audience"><span>Which businesses?</span><input id="audience" maxlength="80" required value="Travel & tour operators" autocomplete="off"></label><label class="field" for="location"><span>Where?</span><input id="location" maxlength="80" required value="Dubai, UAE" autocomplete="off"></label></div>
-<p id="formError" class="error" role="alert" hidden></p>
-<button class="primary wide" type="submit">Start my SDR demo →</button>
-<p class="form-foot">Try the example above, or change it. No approvals needed at each step.</p>
-</form></section>
-<section id="workspace" hidden>
-<div class="campaign" id="campaignSummary"></div>
-<div class="statusbox">
-<div class="statusline"><div aria-live="polite" aria-atomic="true"><div class="eyebrow" id="statusLabel">Demo running</div><h2 id="statusTitle"></h2></div><button id="pauseBtn" class="secondary" type="button">Pause</button></div>
-<p id="statusHint"></p><div class="track" role="progressbar" aria-label="Demo progress" aria-valuemin="0" aria-valuemax="6" id="progress"><div class="fill" id="progressFill"></div></div><div class="progress-caption" id="stepText"></div>
-</div>
-<div class="stats" aria-label="Simulated results"><div class="stat"><strong id="found">0</strong><span>Businesses found</span></div><div class="stat"><strong id="contacted">0</strong><span>Contacted</span></div><div class="stat"><strong id="ready">0</strong><span>Ready for you</span></div></div>
-<div class="sectionhead"><h2>Needs your attention</h2><span class="badge">Mock results</span></div>
-<div id="opportunities"></div>
-<details><summary>What the SDR handled</summary><ol class="timeline" id="timeline"></ol><p class="small muted">Scripted examples, not AI predictions or expected sales results. “Days” are compressed into seconds.</p></details>
-<button class="textbtn" id="resetBtn" type="button">Change campaign / start over</button>
-<p id="storageNotice" class="notice"></p>
-</section>
-</main>
-<aside class="card responsibilities">
-<div class="eyebrow">The division of work</div><h2>Let it do the legwork.</h2>
-<ul><li>Find businesses that fit.</li><li>Write and send tailored outreach.</li><li>Follow up without chasing you.</li><li>Check interest, budget, and timing.</li><li>Stop on a “no”. Hand over a “yes”.</li></ul>
-<strong>Your part</strong><p>Take over when you want, or let the SDR keep handling the conversation.</p>
-<div class="divider"></div>
-<div class="phase"><strong>1 · Build & test</strong><span class="pill">Here now</span></div><div class="phase"><span>2 · Small live tests</span><em>Not enabled</em></div><div class="phase"><span>3 · Scale up</span><em>Not enabled</em></div>
-<p class="notice">This browser demo is not a 24/7 worker. It runs while this page is open. Reopening pauses it until you resume.</p>
-</aside>
-</div>
-<footer><span>PHASE 1 / Nothing leaves this dashboard.</span><span>Real database and background automation are not controlled here.</span></footer>
-</div>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://jequjltbvofmhfnbsfzt.supabase.co; img-src data:; base-uri 'none'; form-action 'none'"><title>LeadEngine · Your SDR</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23101827'/%3E%3Cpath d='M9 8v16h15' stroke='%235ee0b4' stroke-width='4' fill='none'/%3E%3C/svg%3E"><style>
+:root{font-family:Inter,system-ui,sans-serif;color:#182331;background:#f3f5f8;font-size:16px}*{box-sizing:border-box}body{margin:0}button,input{font:inherit}button{cursor:pointer;border:1px solid #c6cdd7;background:white;border-radius:9px;padding:11px 16px;color:#192735}button:hover{background:#edf4f1}button:disabled{opacity:.5;cursor:wait}button.primary{background:#163c32;color:white;border-color:#163c32}.shell{display:grid;grid-template-columns:220px 1fr;min-height:100vh}aside{background:#101b2a;color:#e4eaf3;padding:30px 22px;display:flex;flex-direction:column;gap:30px}.brand{font-size:23px;font-weight:750;letter-spacing:-1px}.brand span{color:#67e0b6}aside small{color:#a5b3c7;font-size:14px}.nav{padding:13px;border-radius:9px;background:#223448;border-left:3px solid #67e0b6}aside .bottom{margin-top:auto;line-height:1.7}main{padding:32px clamp(18px,4vw,56px);max-width:1500px;width:100%}.top{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:24px}h1{font-size:30px;letter-spacing:-1px;margin:0 0 6px}p{margin:8px 0;line-height:1.55}.muted{color:#637084}.small{font-size:14px}.badge{display:inline-block;border-radius:100px;padding:6px 11px;background:#e5eaf0;font-size:14px;font-weight:650}.ok{background:#dcf5e9;color:#1b6549}.warn{background:#fff0d1;color:#8b5700}.bad{background:#ffe2df;color:#9c2929}.status{background:#13273a;color:white;padding:24px 26px;border-radius:15px;margin-bottom:22px;display:flex;justify-content:space-between;gap:20px;align-items:center}.status h2{font-size:24px;margin:0 0 8px}.status p{color:#c0cedd}.controls{display:flex;gap:9px;flex-wrap:wrap}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin:22px 0}.stat,.panel{background:white;border:1px solid #dfe5eb;border-radius:13px;padding:21px}.stat .num{font-size:30px;letter-spacing:-1px;font-weight:750;margin:9px 0 3px}.grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:20px}.panel h2{font-size:19px;margin:0 0 18px}.message{padding:15px 17px;border-radius:10px;background:#f0f3f7;margin:12px 0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65}.message.buyer{border-left:3px solid #1c8a67;background:#edf7f3}.msghead{display:flex;justify-content:space-between;gap:8px;font-size:14px;color:#536276;margin-bottom:5px}.preview{border:1px dashed #aabac7;padding:15px;border-radius:10px;margin-top:18px}.event{padding:13px 0;border-top:1px solid #e8edf1;display:flex;justify-content:space-between;gap:12px}.event strong{font-size:15px}.event time{font-size:14px;color:#667386;white-space:nowrap}.scroll{max-height:590px;overflow:auto}.full{margin-top:20px}table{border-collapse:collapse;width:100%;text-align:left;font-size:14px}th,td{padding:12px 10px;border-bottom:1px solid #e7ebef;white-space:nowrap}th{color:#657185;font-weight:550}.tablewrap{overflow:auto}.notice{background:#fff1d8;border-radius:9px;padding:12px 16px;margin:12px 0}.hidden{display:none!important}#login{max-width:520px;margin:15vh auto;padding:30px;background:white;border-radius:16px;border:1px solid #dae2e9}#login input{width:100%;padding:12px;margin:10px 0;border:1px solid #b9c4d0;border-radius:8px}#error{color:#a62d23;white-space:pre-wrap}details summary{cursor:pointer;font-size:14px;color:#536276}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}footer{padding:20px 0;color:#647184;font-size:14px}.pulse{display:flex;gap:4px;align-items:end;height:28px;margin-top:12px}.pulse i{width:7px;height:18px;background:#67e0b6;border-radius:3px}.pulse i.gap{background:#deab51;height:8px}@media(max-width:1000px){.shell{grid-template-columns:1fr}aside{padding:16px 22px;flex-direction:row;justify-content:space-between;align-items:center}aside .bottom,.nav{display:none}.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}main{padding:22px}.status{align-items:flex-start;flex-direction:column}}@media(max-width:460px){.top{align-items:flex-start}h1{font-size:25px}.stats{gap:10px}.stat{padding:15px}.stat .num{font-size:25px}main{padding:15px}.controls button{flex:1}.status{padding:20px}}
+</style></head><body>
+<section id="login"><div class="brand">LeadEngine</div><h1>Your private SDR dashboard</h1><p>Open the private link supplied in your chat, or enter your access key.</p><label for="access">Access key</label><input id="access" type="password" autocomplete="off"><button id="unlock" class="primary">Open dashboard</button><p id="loginError" role="alert"></p></section>
+<div id="app" class="shell hidden"><aside><div><div class="brand">Lead<span>Engine</span></div><small>YOUR SALES WORKSPACE</small></div><div class="nav">Inbox & activity</div><div class="bottom"><small>Monthly profit goal</small><div style="font-size:26px">$1,000</div><small>Goal, not earned revenue</small></div></aside><main>
+<header class="top"><div><h1>Your SDR, at a glance</h1><div class="muted">Social media packages · $350 per pack</div></div><button id="refresh">Refresh</button></header><div id="error" role="alert"></div>
+<section class="status"><div><span class="badge" id="mode">Connecting</span><h2 id="health" style="margin-top:12px">Checking the worker…</h2><p id="healthText">Waiting for live data.</p><div id="pulse" class="pulse" aria-hidden="true"></div></div><div class="controls"><button id="pause">Pause replies</button><button id="resume">Resume AI</button><button id="takeover">I’ll take over</button></div></section>
+<div class="notice" id="scope">Owner inbox test. Real prospect outreach is off.</div>
+<section class="stats"><div class="stat"><div class="muted small">Replies sent</div><div id="sent" class="num">—</div><div class="small muted" id="allowance">Loading</div></div><div class="stat"><div class="muted small">Average reply time</div><div id="latency" class="num">—</div><div class="small muted">Received → Gmail accepted</div></div><div class="stat"><div class="muted small">Last inbox check</div><div id="checked" class="num">—</div><div id="checktime" class="small muted"></div></div><div class="stat"><div class="muted small">Needs your attention</div><div id="attention" class="num">—</div><div id="reason" class="small muted"></div></div></section>
+<div class="grid"><section class="panel"><h2>Current conversation</h2><div class="small muted">Your test inbox · mtiameer4@gmail.com</div><div id="messages" class="scroll"></div><div id="preview" class="preview hidden"></div></section><section class="panel"><h2>Live activity</h2><p id="emptyActivity" class="muted">Loading activity…</p><div id="events" class="scroll"></div></section></div>
+<section class="panel full"><div class="top"><h2 style="margin:0">Response timing log</h2><button id="export">Download log</button></div><p class="muted small">Only measured sends appear here. Earlier sends without timing data are not estimated.</p><div class="tablewrap"><table><thead><tr><th>Sent</th><th>Inbox wait</th><th>AI time</th><th>Send time</th><th>Total response</th></tr></thead><tbody id="timings"></tbody></table></div></section><footer id="updated">Live data refreshes every 15 seconds.</footer>
+</main></div>
 <script>
-'use strict';
-const $=id=>document.getElementById(id);
-const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-// BEGIN ENGINE EXAMPLES
-const CONVERSATIONS=[[{"prospect": "What is the price?", "action": "draft", "reason": "Continue qualification", "body": "Example only: the demo package is USD 350.\n\nWhat would you most like this service to improve for your business?", "facts": {}, "payment_status": "not_verified"}, {"prospect": "We need consistent social posts", "action": "draft", "reason": "Continue qualification", "body": "What budget range would you be comfortable considering?", "facts": {"need": {"quote": "We need consistent social posts", "message_id": "1"}}, "payment_status": "not_verified"}, {"prospect": "We can spend USD 350", "action": "draft", "reason": "Continue qualification", "body": "When would you want to get started?", "facts": {"need": {"quote": "We need consistent social posts", "message_id": "1"}, "budget": {"quote": "We can spend USD 350", "message_id": "2"}}, "payment_status": "not_verified"}, {"prospect": "We want to start this month", "action": "draft", "reason": "Continue qualification", "body": "Would you approve this yourself, or would someone else need to be involved?", "facts": {"need": {"quote": "We need consistent social posts", "message_id": "1"}, "budget": {"quote": "We can spend USD 350", "message_id": "2"}, "timing": {"quote": "We want to start this month", "message_id": "3"}}, "payment_status": "not_verified"}, {"prospect": "I am the owner and approve purchases", "action": "draft", "reason": "Continue qualification", "body": "Would you like to discuss a specific proposal with us?", "facts": {"need": {"quote": "We need consistent social posts", "message_id": "1"}, "budget": {"quote": "We can spend USD 350", "message_id": "2"}, "timing": {"quote": "We want to start this month", "message_id": "3"}, "authority": {"quote": "I am the owner and approve purchases", "message_id": "4"}}, "payment_status": "not_verified"}, {"prospect": "Yes, please discuss a proposal with me", "action": "handoff", "reason": "Need, budget, timing and authority stated; confirm fit and next step with buyer", "body": "", "facts": {"need": {"quote": "We need consistent social posts", "message_id": "1"}, "budget": {"quote": "We can spend USD 350", "message_id": "2"}, "timing": {"quote": "We want to start this month", "message_id": "3"}, "authority": {"quote": "I am the owner and approve purchases", "message_id": "4"}}, "payment_status": "not_verified"}], [{"prospect": "What is included?", "action": "draft", "reason": "Continue qualification", "body": "Example only: the demo package includes posts and captions.\n\nWhat would you most like this service to improve for your business?", "facts": {}, "payment_status": "not_verified"}, {"prospect": "That feels expensive", "action": "draft", "reason": "Continue qualification", "body": "What would need to change for this to be worth considering?", "facts": {}, "payment_status": "not_verified"}, {"prospect": "Please contact me next month", "action": "wait", "reason": "Prospect asked to wait; timing needs scheduling before live use", "body": "", "facts": {}, "payment_status": "not_verified"}]];
-// END ENGINE EXAMPLES
-const STORE='leadengine-sdr-demo-v2';
-const STAGES=[
- ['Finding suitable businesses','The SDR is searching your chosen market. You do not need to do anything.'],
- ['Checking who is worth contacting','Filtering for fit and usable contact details. Poor matches are left out.'],
- ['Writing and sending outreach','Tailored messages are being simulated. No real emails are sent.'],
- ['Following up automatically','Simulating a later follow-up to people who have not replied.'],
- ['Checking replies and buying intent','The SDR checks interest, budget, and timing, and stops contacting anyone who says no.'],
- ['Preparing your handover','Pulling the useful conversations into short briefs for you.'],
- ['Your opportunities are ready','The demo is complete. Review the briefs below; the routine work is already handled.']
-];
-const EVENTS=[
- 'Found 12 fictional businesses in your target market.',
- 'Kept 8 suitable businesses; skipped 4 poor fits or missing contacts.',
- 'Simulated 8 tailored first emails. No real messages sent.',
- 'Simulated one follow-up to 6 non-responders, two days later.',
- 'Simulated 3 replies: 2 interested, 1 not interested. Stopped follow-ups to all 3.',
- 'Prepared 2 interested opportunities; budgets still need confirmation. 5 have not replied; no more follow-ups in this demo.'
-];
-let state={version:2,campaign:null,stage:0,status:'idle',handled:[],opened:null,continuing:{},followPaused:false};
-let timer=null,followTimer=null,storageOK=true;
-function valid(s){return s&&s.version===2&&s.campaign&&['offer','audience','location'].every(k=>typeof s.campaign[k]==='string'&&s.campaign[k].trim().length>0&&s.campaign[k].length<=120)&&Number.isInteger(s.stage)&&s.stage>=0&&s.stage<=6&&['running','paused','complete'].includes(s.status)&&Array.isArray(s.handled)&&s.handled.every(x=>x===0||x===1)}
-function save(){try{localStorage.setItem(STORE,JSON.stringify(state))}catch{storageOK=false}}
-function restore(){try{const s=JSON.parse(localStorage.getItem(STORE));if(valid(s)){state=s;state.opened=null;state.continuing=validContinuing(s.continuing)?s.continuing:{};state.followPaused=true;state.status=state.stage===6?'complete':'paused';}}catch{storageOK=false}}
-function cancelTimer(){if(timer!==null){clearTimeout(timer);timer=null}}
-function schedule(){cancelTimer();if(state.status==='running')timer=setTimeout(tick,3000)}
-function tick(){timer=null;if(state.status!=='running')return;state.stage=Math.min(6,state.stage+1);if(state.stage===6)state.status='complete';save();render();schedule()}
-function start(event){event.preventDefault();if(state.status==='running')return;
- const campaign={offer:$('offer').value.trim(),audience:$('audience').value.trim(),location:$('location').value.trim()};
- if(Object.values(campaign).some(v=>!v)){ $('formError').hidden=false;$('formError').textContent='Please fill in your service, business type, and location.';return}
- cancelTimer();state={version:2,campaign,stage:0,status:'running',handled:[],opened:null,continuing:{},followPaused:false};save();render();schedule();
-}
-function togglePause(){if(state.stage===6){state.followPaused=!state.followPaused;save();render();scheduleConversation();return}if(state.status==='running'){state.status='paused';cancelTimer()}else if(state.status==='paused'){state.status='running';schedule()}save();render()}
-function reset(){if(!confirm('Start over? This clears only the fictional results in this browser.'))return;
- cancelTimer();clearTimeout(followTimer);if(state.campaign){for(const k of ['offer','audience','location'])$(k).value=state.campaign[k]}
- state={version:2,campaign:null,stage:0,status:'idle',handled:[],opened:null,continuing:{},followPaused:false};try{localStorage.removeItem(STORE)}catch{storageOK=false}
- $('formError').hidden=true;render();$('offer').focus();
-}
-function openBrief(id){state.opened=state.opened===id?null:id;renderOpportunities()}
-function takeOver(id){if(state.stage!==6||![0,1].includes(id)||state.handled.includes(id))return;state.handled.push(id);if(state.continuing[id])state.continuing[id].owner='human';save();render();scheduleConversation()}
-function validContinuing(v){return v&&typeof v==='object'&&!Array.isArray(v)&&Object.entries(v).every(([id,c])=>['0','1'].includes(id)&&c&&['sdr','human'].includes(c.owner)&&Number.isInteger(c.index)&&c.index>=0&&c.index<=CONVERSATIONS[Number(id)].length)}
-function hasConversationWork(){return Object.entries(state.continuing||{}).some(([id,c])=>c.owner==='sdr'&&c.index<CONVERSATIONS[id].length)}
-function keepHandling(id){
- if(state.stage!==6||![0,1].includes(id))return;
- state.handled=state.handled.filter(x=>x!==id);
- const old=state.continuing[id];
- state.continuing[id]={owner:'sdr',index:old?old.index:0};
- state.followPaused=false;save();render();scheduleConversation();
-}
-function scheduleConversation(){clearTimeout(followTimer);if(!state.followPaused&&hasConversationWork())followTimer=setTimeout(conversationTick,2200)}
-function conversationTick(){
- if(state.followPaused)return;
- for(const [id,c] of Object.entries(state.continuing)){if(c.owner==='sdr'&&c.index<CONVERSATIONS[id].length)c.index++}
- save();render();scheduleConversation();
-}
-function conversationHTML(id){
- const c=state.continuing[id];if(!c)return '';
- const events=CONVERSATIONS[id].slice(0,c.index);
- let html='<div class="brief"><strong>'+(c.owner==='human'?'You are handling this':state.followPaused&&c.index<CONVERSATIONS[id].length?'SDR paused':'SDR conversation · simulated')+'</strong><p class="small muted">Fictional replies and example package terms. This tests decisions, not real buyer behaviour.</p>';
- const renderEvent=e=>'<p class="quote"><strong>Prospect:</strong> '+esc(e.prospect)+'</p>'+(e.body?'<p><strong>SDR draft:</strong> '+esc(e.body)+'</p>':'<p><strong>Next action:</strong> '+esc(e.reason)+'</p>');
- html+=events.slice(-1).map(renderEvent).join('');
- if(events.length>1)html+='<details><summary>Earlier messages</summary>'+events.slice(0,-1).map(renderEvent).join('')+'</details>';
- if(!events.length)html+='<p>SDR is reviewing the conversation…</p>';
- if(c.index===CONVERSATIONS[id].length)html+='<p><strong>'+(id===0?'Ready to discuss a proposal. No payment or booking confirmed.':'Asked to wait until next month. No reminder has been scheduled in this demo.')+'</strong></p>';
- return html+'</div>';
-}
-function renderOpportunities(){
- if(state.stage<6){$('opportunities').innerHTML='<div class="empty"><strong>Nothing for you to do yet.</strong><p class="muted">The SDR will bring interested prospects here automatically.</p></div>';return}
- $('opportunities').innerHTML=[0,1].map(id=>{
- const handled=state.handled.includes(id),open=state.opened===id,c=state.continuing[id];
- const name='Sample '+state.campaign.audience+' '+(id+1);
- const reply=id===0?'We are interested. Could we discuss what is included and your pricing?':'This could be useful. Please send the details; we are planning for next month.';
- const timing=id===0?'This month':'Next month';
- const price=id===0?'Not confirmed':'Asked for pricing';
- return '<article class="opportunity '+(handled?'done-state':'')+'"><div class="opphead"><h3>'+esc(name)+'</h3><span class="pill">'+(handled?'Taken over · demo':c?(c.index>=CONVERSATIONS[id].length?(id===0?'Ready to discuss · demo':'Waiting · demo'):'SDR handling · demo'):'Interested · demo')+'</span></div><p class="muted">'+esc(state.campaign.location)+' · Fictional business</p><p>'+esc(reply)+'</p><div class="tags"><span class="tag">Interest: confirmed</span><span class="tag">Budget: '+esc(c&&c.index&&CONVERSATIONS[id][c.index-1].facts.budget?CONVERSATIONS[id][c.index-1].facts.budget.quote:price)+'</span><span class="tag">Timing: '+timing+'</span></div><div class="conversation-actions"><button class="primary" data-continue="'+id+'" '+(c&&c.owner==='sdr'?'disabled':'')+'>SDR, keep handling it</button><button class="secondary" data-take="'+id+'" '+(handled?'disabled':'')+'>I’ll take over</button></div><button class="secondary wide" data-open="'+id+'" aria-expanded="'+open+'">'+(open?'Close brief':'View conversation & next step')+'</button>'+
- conversationHTML(id)+(open?'<div class="brief"><div class="eyebrow">Initial mock conversation</div><p><strong>SDR:</strong> Hi, could '+esc(state.campaign.offer)+' help your '+esc(state.campaign.audience)+' business in '+esc(state.campaign.location)+'? Happy to explain the options.</p><p class="quote"><strong>Prospect:</strong> '+esc(reply)+'</p><p><strong>SDR:</strong> Are you considering this soon, and do you have a budget in mind?</p><p class="quote"><strong>Prospect:</strong> '+(id===0?'This month, if it fits. We have not set a budget yet.':'Next month. Please share pricing first.')+'</p><div class="divider"></div><h3>Your next step</h3><ol><li>Discuss the service and confirm their budget.</li><li>Offer a short call if there is a fit.</li></ol><p class="small muted">This initial conversation did not confirm a budget or book an appointment. Contact: sample'+(id+1)+'@example.com (fictional).</p><div class="actions"><button class="primary" data-take="'+id+'" '+(handled?'disabled':'')+'>'+(handled?'Taken over':'I’ll take it from here — demo')+'</button></div></div>':'')+'</article>';
- }).join('');
- document.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>openBrief(Number(b.dataset.open))));
- document.querySelectorAll('[data-continue]').forEach(b=>b.addEventListener('click',()=>keepHandling(Number(b.dataset.continue))));
- document.querySelectorAll('[data-take]').forEach(b=>b.addEventListener('click',()=>takeOver(Number(b.dataset.take))));
-}
-function render(){
- const active=state.status!=='idle';$('setup').hidden=active;$('workspace').hidden=!active;if(!active)return;
- $('campaignSummary').textContent=state.campaign.offer+' · '+state.campaign.audience+' · '+state.campaign.location;
- const paused=state.status==='paused',complete=state.stage===6;
- $('statusLabel').textContent=paused?'Demo paused':complete?'Demo complete':'SDR working · simulation';
- $('statusTitle').textContent=paused?'Paused. You are in control.':STAGES[state.stage][0];
- $('statusHint').textContent=paused?'Press Resume to continue from where you stopped. No new demo actions happen while paused.':STAGES[state.stage][1];
- if(complete&&hasConversationWork()){$('statusLabel').textContent=state.followPaused?'Conversation paused':'SDR handling replies · simulation';$('statusTitle').textContent=state.followPaused?'Paused. Resume when ready.':'Continuing the conversation';$('statusHint').textContent='The SDR is checking the next step. You can take over any prospect below.';}
- $('pauseBtn').hidden=complete&&!hasConversationWork();$('pauseBtn').textContent=(complete?state.followPaused:paused)?'Resume':'Pause';
- $('progress').setAttribute('aria-valuenow',String(state.stage));$('progressFill').style.width=(state.stage/6*100)+'%';
- $('stepText').textContent=state.stage+' of 6 tasks completed automatically';
- $('found').textContent=state.stage>=1?'12':'0';$('contacted').textContent=state.stage>=3?'8':'0';$('ready').textContent=complete?String([0,1].filter(id=>!state.handled.includes(id)&&(!state.continuing[id]||(id===0&&state.continuing[id].index===CONVERSATIONS[id].length))).length):'0';
- $('timeline').innerHTML=EVENTS.map((e,i)=>'<li class="'+(i<state.stage?'done':'')+'">'+(i<state.stage?'✓ '+esc(e):'Pending: '+esc(STAGES[i][0]))+'</li>').join('');
- $('storageNotice').textContent=storageOK?'Demo progress is saved on this browser only. Reopening pauses unfinished work.':'Browser storage is unavailable. You can still test; reloading will reset progress.';
- renderOpportunities();
-}
-$('campaignForm').addEventListener('submit',start);
-$('pauseBtn').addEventListener('click',togglePause);
-$('resetBtn').addEventListener('click',reset);
-restore();render();
-</script>
-</body>
-</html>
+const API='https://jequjltbvofmhfnbsfzt.supabase.co/functions/v1/leadengine-owner-dashboard';
+const el=id=>document.getElementById(id);let latest=null,busy=false;
+let token=new URLSearchParams(location.hash.slice(1)).get('access')||sessionStorage.getItem('leadengine_access')||'';
+if(location.hash)history.replaceState(null,'',location.pathname+location.search);
+function seconds(n){return n==null?'—':n<60?Math.round(n)+'s':n<3600?(n/60).toFixed(1)+'m':(n/3600).toFixed(1)+'h'}
+function date(v){return v?new Date(v).toLocaleString():''}
+function node(tag,text,cls){const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n}
+async function api(method='GET',body){const r=await fetch(API,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d}
+async function load(){if(busy||!token)return;busy=true;try{const d=await api();latest=d;sessionStorage.setItem('leadengine_access',token);el('login').classList.add('hidden');el('app').classList.remove('hidden');el('error').textContent='';render(d)}catch(e){el('error').textContent=e.message;el('loginError').textContent=e.message;if(latest){el('health').textContent='Connection lost';el('healthText').textContent='Displayed information may be out of date.'}}finally{busy=false}}
+function render(d){const c=d.conversation,now=Date.parse(d.now),last=d.checks[0],age=last?(now-Date.parse(last.at))/1000:null;const expired=Date.parse(c.expires_at)<=now,cap=c.replies_sent>=c.reply_cap,needs=c.status==='review'||c.owner==='human';
+el('mode').textContent='OWNER INBOX TEST';el('mode').className='badge';
+const health=expired?'Test window ended':cap?'Reply limit reached':!c.enabled||c.owner==='human'?'Paused — you’re in control':age===null||age>90?'Worker check is overdue':'AI is watching your inbox';
+el('health').textContent=health;el('healthText').textContent=expired?'Sending has stopped.':cap?'Sending has stopped at the approved limit.':!c.enabled?'Automatic replies are paused.':age===null||age>90?'The last check is stale. A worker restart may be delayed.':'New replies will be read automatically. No chat confirmation needed.';
+el('sent').textContent=c.replies_sent;el('allowance').textContent=Math.max(0,c.reply_cap-c.replies_sent)+' replies remaining';el('checked').textContent=age===null?'No checks':seconds(age)+' ago';el('checktime').textContent=last?date(last.at):'';el('attention').textContent=needs?'1':'0';el('reason').textContent=needs?(c.last_decision?.reason||'Owner has control'):'No current handoff';
+el('scope').textContent='Owner inbox test only. Real prospect outreach '+(d.settings.sending_enabled?'is ENABLED — check settings.':'is OFF.')+' Test ends '+date(c.expires_at)+'.';
+const sent=d.events.filter(e=>e.event==='sent');el('latency').textContent=sent.length?seconds(sent.reduce((a,e)=>a+e.data.response_seconds,0)/sent.length):'No data';
+el('pulse').replaceChildren(...d.checks.slice(0,20).reverse().map((x,i,a)=>{const bar=node('i','');if(i&&Date.parse(x.at)-Date.parse(a[i-1].at)>90000)bar.className='gap';return bar}));
+el('messages').replaceChildren();for(const h of c.state.history||[]){const box=node('div','message');box.className='message'+(h.role==='prospect'?' buyer':'');box.append(node('div',h.role==='prospect'?'YOU · BUYER':h.role==='sdr_sent'?'INITIAL EMAIL':'AI · RECORDED REPLY','msghead'),node('div',h.text));el('messages').append(box)}
+const p=c.last_decision?.preview;el('preview').classList.toggle('hidden',!p);if(p){el('preview').replaceChildren(node('strong','Corrected answer preview · not sent'),node('p',p.decision.body||p.decision.reason))}
+const names={worker_started:'Worker started',worker_finished:'Worker session finished',worker_blocked:'Worker stopped at a control limit',received:'Buyer reply received',decision:'AI decision recorded',send_started:'Sending reply',sent:'Reply sent',retry_later:'AI unavailable — retry pending',error:'Reply needs review',worker_error:'Worker error',provider_configuration_error:'AI configuration error',owner_control:'Owner changed controls',human_takeover:'Human takeover detected'};
+el('events').replaceChildren();el('emptyActivity').textContent=d.events.length?'':'No events recorded yet.';for(const e of d.events.slice(0,35)){const row=node('div','','event'),left=node('div','');left.append(node('strong',names[e.event]||e.event));if(e.data?.decision)left.append(node('p',e.data.decision.reason,'muted small'));if(e.data?.action)left.append(node('p',e.data.action,'muted small'));if(e.data?.assessment?.answer_keys)left.append(node('p','Answers: '+e.data.assessment.answer_keys.join(', '),'muted small'));row.append(left,node('time',new Date(e.at).toLocaleTimeString()));el('events').append(row)}
+el('timings').replaceChildren();if(!sent.length){const tr=node('tr',''),td=node('td','No timed replies yet. The next automatic reply will appear here.');td.colSpan=5;tr.append(td);el('timings').append(tr)}for(const e of sent){const tr=node('tr','');[date(e.data.sent_at),seconds(e.data.inbox_wait_seconds),seconds(e.data.ai_seconds),seconds(e.data.send_seconds),seconds(e.data.response_seconds)].forEach(t=>tr.append(node('td',t)));el('timings').append(tr)}el('updated').textContent='Updated '+date(d.now)+' · Refreshes every 15 seconds.';
+el('resume').disabled=expired||cap||c.status==='stopped'||(c.enabled&&c.owner==='sdr');el('pause').disabled=!c.enabled;el('takeover').disabled=c.owner==='human';}
+for(const action of ['pause','resume','takeover'])el(action).onclick=async()=>{if(!latest)return;try{el(action).disabled=true;await api('POST',{action,version:latest.conversation.version});await load()}catch(e){el('error').textContent=e.message;await load()}};
+el('refresh').onclick=load;el('unlock').onclick=()=>{token=el('access').value.trim();load()};el('export').onclick=()=>{if(!latest)return;const blob=new Blob([JSON.stringify(latest,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='leadengine-response-log.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
+load();setInterval(load,15000);
+</script></body></html>

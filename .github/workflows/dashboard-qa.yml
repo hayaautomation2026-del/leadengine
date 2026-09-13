@@ -1,0 +1,23 @@
+name: Live dashboard checks
+on:
+  push:
+    branches: [main]
+    paths: ['dashboard.html', 'test_dashboard_live.cjs', '.github/workflows/dashboard-qa.yml']
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --package-lock=false playwright@1.58.2
+      - run: npx playwright install --with-deps chromium
+      - run: node test_dashboard_live.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-qa-synthetic-data
+          path: dashboard-*.png
