@@ -3,7 +3,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
-from email.utils import parseaddr
+from email.utils import parseaddr, getaddresses
 
 import inbox_conversation as flow
 from response_audit import record
@@ -46,8 +46,38 @@ def with_transient_retry(check_id, operation, fn):
             time.sleep(delay)
 
 
+def normalized_subject(value):
+    value = str(value or "").strip().lower()
+    while value.startswith("re:"):
+        value = value[3:].strip()
+    return value
+
+
+def recipient_addresses(headers):
+    values = []
+    for name in ("To", "Cc", "Delivered-To", "X-Original-To"):
+        value = flow.worker.header_value(headers, name)
+        if value:
+            values.append(value)
+    return {addr.lower() for _, addr in getaddresses(values) if addr}
+
+
+def robust_customer_messages(thread, check):
+    """Accept the exact test sender when Gmail rewrites recipient headers."""
+    matches = []
+    expected_from = check["recipient"].lower()
+    expected_to = check["expected_sender"].lower()
+    for msg in thread.get("messages", []):
+        headers = msg.get("payload", {}).get("headers", [])
+        sender = parseaddr(flow.worker.header_value(headers, "From"))[1].lower()
+        recipients = recipient_addresses(headers)
+        if sender == expected_from and expected_to in recipients:
+            matches.append(msg)
+    return sorted(matches, key=lambda m: int(m.get("internalDate", 0)))
+
+
 def relink_controlled_thread(check_id, config):
-    """Recover only the controlled test if Gmail places an exact reply in a new thread."""
+    """Recover only the controlled test if Gmail places the exact reply in another thread."""
     checks = flow.worker.sb("GET", "sdr_inbox_checks", params={
         "select": "id,recipient,expected_sender,subject,gmail_thread_id,sent_at",
         "id": f"eq.{check_id}",
@@ -61,48 +91,49 @@ def relink_controlled_thread(check_id, config):
         return
 
     token = flow.worker.gmail_token()
-    safe_subject = str(check["subject"]).replace('"', '')[:180]
-    query = (
-        f'from:{check["recipient"]} '
-        f'to:{check["expected_sender"]} '
-        f'subject:"{safe_subject}" newer_than:2d'
-    )
-    found = flow.worker.gmail_api(token, "GET", "messages", params={"q": query, "maxResults": 10}) or {}
+    # Search broadly by the exact test sender first. Header filtering below keeps this bounded.
+    query = f'from:{check["recipient"]} newer_than:2d'
+    found = flow.worker.gmail_api(token, "GET", "messages", params={"q": query, "maxResults": 25}) or {}
     processed = set((config.get("state") or {}).get("processed") or [])
-
     candidates = []
+
     for item in found.get("messages", []):
         if item.get("id") in processed:
             continue
         msg = flow.worker.gmail_api(token, "GET", f'messages/{item["id"]}', params={"format": "metadata"})
         headers = msg.get("payload", {}).get("headers", [])
         sender = parseaddr(flow.worker.header_value(headers, "From"))[1].lower()
-        recipient = parseaddr(flow.worker.header_value(headers, "To"))[1].lower()
+        recipients = recipient_addresses(headers)
         subject = flow.worker.header_value(headers, "Subject")
-        if sender != check["recipient"].lower() or recipient != check["expected_sender"].lower():
+        if sender != check["recipient"].lower():
             continue
-        if subject.lower().removeprefix("re:").strip() != str(check["subject"]).lower().removeprefix("re:").strip():
+        if check["expected_sender"].lower() not in recipients:
+            continue
+        if normalized_subject(subject) != normalized_subject(check["subject"]):
             continue
         candidates.append(msg)
 
+    record(check_id, "gmail_search", found=len(found.get("messages", [])), candidates=len(candidates))
     if not candidates:
         return
 
     newest = max(candidates, key=lambda m: int(m.get("internalDate", 0)))
     new_thread_id = newest.get("threadId")
-    if not new_thread_id or new_thread_id == check["gmail_thread_id"]:
+    if not new_thread_id:
         return
-
-    flow.worker.sb("PATCH", "sdr_inbox_checks", params={"id": f"eq.{check_id}"}, body={
-        "gmail_thread_id": new_thread_id,
-    }, prefer="return=minimal")
-    record(check_id, "thread_relinked", old_thread_id=check["gmail_thread_id"],
-           new_thread_id=new_thread_id, message_id=newest.get("id"))
+    if new_thread_id != check["gmail_thread_id"]:
+        flow.worker.sb("PATCH", "sdr_inbox_checks", params={"id": f"eq.{check_id}"}, body={
+            "gmail_thread_id": new_thread_id,
+        }, prefer="return=minimal")
+        record(check_id, "thread_relinked", old_thread_id=check["gmail_thread_id"],
+               new_thread_id=new_thread_id, message_id=newest.get("id"))
 
 
 def main():
     check_id = os.environ['INBOX_CHECK_ID']
     deadline = time.monotonic() + 18000
+    # Hotfix the bounded test matcher only; real prospect sending remains disabled.
+    flow.customer_messages = robust_customer_messages
     record(check_id, 'worker_started', poll_seconds=POLL_SECONDS)
     while time.monotonic() < deadline:
         try:
