@@ -1,7 +1,10 @@
+import base64
+from email import message_from_bytes
 import unittest
 from unittest.mock import patch
 
 import unattended_inbox as ui
+from conversation_engine import new_conversation
 
 
 def msg(mid, thread, when, sender, to):
@@ -67,6 +70,51 @@ class UnattendedInboxTests(unittest.TestCase):
             ui.relink_controlled_thread("check", config)
 
         self.assertEqual(patches, [("sdr_inbox_checks", {"gmail_thread_id": "new-thread"})])
+
+    def test_gmail_native_reply_lets_gmail_generate_message_id(self):
+        inbound = {
+            "id": "in1",
+            "payload": {"headers": [
+                {"name": "Subject", "value": "Inbox test"},
+                {"name": "Message-ID", "value": "<in1@example.com>"},
+                {"name": "References", "value": ""},
+            ]},
+        }
+        check = {
+            "recipient": "mtiameer4@gmail.com",
+            "expected_sender": "aiagentsutomations01@gmail.com",
+            "gmail_thread_id": "thread1",
+        }
+        payload = ui.gmail_native_reply_payload(check, inbound, "hello")
+        mime = message_from_bytes(base64.urlsafe_b64decode(payload["raw"] + "=" * (-len(payload["raw"]) % 4)))
+        self.assertEqual(payload["threadId"], "thread1")
+        self.assertEqual(mime["To"], "mtiameer4@gmail.com")
+        self.assertEqual(mime["Subject"], "Re: Inbox test")
+        self.assertEqual(mime["In-Reply-To"], "<in1@example.com>")
+        self.assertIsNone(mime["Message-ID"])
+
+    def test_explicit_bullet_request_is_formatted_as_bullets(self):
+        message = "give me the same details in bullet points"
+        assessment = {
+            "intent": "details",
+            "intent_evidence": message,
+            "answer_keys": ["delivery", "inputs", "inclusions"],
+            "facts": {},
+            "unknown_fields": [],
+        }
+        offer = {"approved_answers": {
+            "delivery": "Delivery timing is confirmed before payment.",
+            "inputs": "We need your logo and business details.",
+            "inclusions": "The package includes posts and captions.",
+        }}
+        _, decision = ui.format_aware_advance(
+            new_conversation(), "m1", message, assessment, offer
+        )
+        self.assertEqual(decision["action"], "draft")
+        self.assertTrue(all(line.startswith("- ") for line in decision["body"].splitlines()))
+        self.assertIn("Delivery timing", decision["body"])
+        self.assertIn("logo and business details", decision["body"])
+        self.assertIn("posts and captions", decision["body"])
 
 
 if __name__ == "__main__":
