@@ -132,7 +132,7 @@ def run_test_conversation(check_id, token=None):
         return worker.sb("PATCH", TABLE, params=params, body={**body, "updated_at": worker.now()}, prefer="return=representation") or []
     try:
         message = "\n".join(latest_text(m) for m in pending)
-        assessment = {} if STOP.search(message) else assess(message, state["history"], model_reader)
+        assessment = {} if STOP.search(message) else assess(message, state["history"], model_reader, config["offer"])
         next_state, decision = advance(state, newest["id"], message, assessment, config["offer"])
         next_state["processed"] = list(dict.fromkeys(next_state["processed"] + [m["id"] for m in pending]))
         if decision["action"] != "draft":

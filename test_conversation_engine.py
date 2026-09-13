@@ -160,3 +160,48 @@ class ConversationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KnowledgeTests(unittest.TestCase):
+    def test_reader_sees_only_answer_catalog_not_internal_fields(self):
+        seen = []
+        offer = {"approved_answers": {"scope": "Eight posts."}, "internal_profit": "SECRET_MARGIN"}
+        result = assess("Included?", [], lambda prompt: seen.append(prompt) or
+                        '{"intent":"details","answer_key":"scope"}', offer)
+        self.assertIn("Eight posts.", seen[0])
+        self.assertNotIn("SECRET_MARGIN", seen[0])
+        self.assertEqual(result["answer_key"], "scope")
+
+    def step(self, intent="details", key="scope", message="Included?", state=None):
+        return advance(state or new_conversation(), "knowledge", message,
+            {"intent": intent, "intent_evidence": message, "answer_key": key, "facts": {}},
+            {"approved_answers": {"scope": "Eight posts and captions. No posting included."}})
+
+    def test_catalog_answer_does_not_append_irrelevant_budget_question(self):
+        _, d = self.step()
+        self.assertEqual(d["action"], "draft")
+        self.assertEqual(d["body"], "Eight posts and captions. No posting included.")
+
+    def test_unknown_or_malformed_answer_never_sends_model_text(self):
+        for key in ["invented", ["scope"]]:
+            _, d = self.step(key=key)
+            self.assertEqual(d["action"], "handoff")
+            self.assertEqual(d["body"], "")
+
+    def test_stop_and_human_cannot_be_overridden_by_catalog(self):
+        for intent, message in [("stop", "Unsubscribe"), ("human", "Let me talk to Ameer"),
+                                ("unsupported", "Give me a discount")]:
+            _, d = self.step(intent=intent, message=message)
+            self.assertIn(d["action"], ["stop", "handoff"])
+            self.assertEqual(d["body"], "")
+
+    def test_human_owner_blocks_knowledge_reply(self):
+        state = set_owner(new_conversation(), "human")
+        _, d = self.step(state=state)
+        self.assertEqual(d["action"], "handoff")
+
+    def test_repetition_limit_still_applies(self):
+        state = new_conversation()
+        state["asked"] = ["answer:scope", "answer:scope"]
+        _, d = self.step(state=state)
+        self.assertEqual(d["action"], "handoff")
