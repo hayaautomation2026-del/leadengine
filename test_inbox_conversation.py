@@ -82,6 +82,15 @@ class ControlledReplyTests(unittest.TestCase):
 
     def run_flow(self): flow.run_test_conversation(CHECK)
 
+    def test_transient_provider_failure_preserves_pending_message(self):
+        self.mocks[-1].side_effect = flow.TransientAIError("503")
+        self.run_flow()
+        self.assertEqual(self.sent, [])
+        self.assertTrue(self.config["enabled"])
+        self.assertEqual(self.config["status"], "active")
+        self.assertEqual(self.config["state"]["processed"], [])
+        self.assertEqual(self.config["replies_sent"], 0)
+
     def test_reply_is_threaded_and_state_is_persisted(self):
         self.run_flow()
         self.assertEqual(len(self.sent), 1)

@@ -20,6 +20,11 @@ from inbox_check import valid_email
 TABLE = "sdr_test_conversations"
 
 
+class TransientAIError(Exception):
+    """Provider failed before a send; preserve the unread work for a later run."""
+
+
+
 def read_config(check_id):
     rows = worker.sb("GET", TABLE, params={"check_id": f"eq.{check_id}", "limit": "1"}) or []
     return rows[0] if rows else None
@@ -62,6 +67,8 @@ def model_reader(prompt):
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}, timeout=60)
     if not response.ok:
         print(f"TEST_AI_READ_FAILURE http_status={response.status_code}")
+        if response.status_code == 429 or response.status_code >= 500:
+            raise TransientAIError("AI temporarily unavailable")
         raise RuntimeError(f"AI HTTP {response.status_code}")
     text = "".join(part.get("text", "") for candidate in response.json().get("candidates", [])
                    for part in candidate.get("content", {}).get("parts", []))
@@ -165,6 +172,9 @@ def run_test_conversation(check_id, token=None):
         if not recorded:
             raise RuntimeError("Send completed but recording needs review")
         print("TEST_CONVERSATION " + json.dumps({"action": "replied", "thread_matches": True, "replies_sent": count}))
+    except TransientAIError:
+        save({"status": "active"}, "processing")
+        print('TEST_CONVERSATION {"action":"retry_later","sent":false}')
     except Exception:
         save({"status": "review", "enabled": False})
         raise RuntimeError("Test conversation needs review; no automatic resend") from None
