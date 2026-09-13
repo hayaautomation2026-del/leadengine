@@ -41,10 +41,10 @@ class UnattendedInboxTests(unittest.TestCase):
             "gmail_thread_id": "old-thread",
             "sent_at": "2026-09-13T23:00:00+00:00",
         }
-        old = msg("old", "old-thread", 1757804300000, "mtiameer4@gmail.com", "aiagentsutomations01@gmail.com")
-        processed = msg("done", "x", 1757804500000, "mtiameer4@gmail.com", "aiagentsutomations01@gmail.com")
-        good = msg("new", "new-thread", 1757804600000, "mtiameer4@gmail.com", "aiagentsutomations01@gmail.com")
-        wrong = msg("wrong", "bad-thread", 1757804700000, "other@example.com", "aiagentsutomations01@gmail.com")
+        old = msg("old", "old-thread", 1789340390000, "mtiameer4@gmail.com", "aiagentsutomations01@gmail.com")
+        processed = msg("done", "x", 1789340500000, "mtiameer4@gmail.com", "aiagentsutomations01@gmail.com")
+        good = msg("new", "new-thread", 1789340600000, "mtiameer4@gmail.com", "aiagentsutomations01@gmail.com")
+        wrong = msg("wrong", "bad-thread", 1789340700000, "other@example.com", "aiagentsutomations01@gmail.com")
         by_id = {m["id"]: m for m in [old, processed, good, wrong]}
         patches = []
 
