@@ -21,7 +21,7 @@ def main():
                   if 'generateContent' in m.get('supportedGenerationMethods', [])
                   and re.fullmatch(r'models/gemini-[a-zA-Z0-9.\-]+', m.get('name', ''))
                   and 'flash' in m['name'] and not any(x in m['name'] for x in ('image', 'audio', 'live', 'tts'))]
-        configured = ['models/' + os.environ.get('GEMINI_MODEL', 'gemini-3.8-flash'), 'models/gemini-2.5-flash']
+        configured = ['models/' + os.environ.get('GEMINI_MODEL', 'gemini-3.8-flash'), 'models/gemini-flash-lite-latest']
         candidates = list(dict.fromkeys(configured + models))[:6]
         for model in candidates:
             try:

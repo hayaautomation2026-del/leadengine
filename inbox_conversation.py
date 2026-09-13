@@ -62,7 +62,7 @@ def model_reader(prompt):
     if not key:
         raise ProviderConfigurationError("AI credentials missing")
     model = os.environ.get("INBOX_GEMINI_MODEL") or os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
-    fallback = os.environ.get("GEMINI_FALLBACK_MODEL", "")
+    fallback = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-flash-lite-latest")
     headers = {"x-goog-api-key": key}
     base = "https://generativelanguage.googleapis.com/v1beta/models/"
     models = list(dict.fromkeys([model, fallback])) if fallback else [model]
@@ -207,7 +207,9 @@ def run_test_conversation(check_id, token=None):
                                 "payment_status": "not_verified"}}, "processing")
         raise ProviderConfigurationError("AI provider configuration failed; no email sent") from None
     except TransientAIError:
-        save({"status": "active"}, "processing")
+        save({"status": "active", "last_decision": {
+            "action": "retry_later", "reason": "AI temporarily unavailable; message remains unprocessed",
+            "body": "", "payment_status": "not_verified"}}, "processing")
         print('TEST_CONVERSATION {"action":"retry_later","sent":false}')
     except Exception:
         save({"status": "review", "enabled": False})
