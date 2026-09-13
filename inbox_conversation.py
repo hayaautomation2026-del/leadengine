@@ -61,8 +61,8 @@ def model_reader(prompt):
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         raise ProviderConfigurationError("AI credentials missing")
-    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
-    fallback = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
+    model = os.environ.get("INBOX_GEMINI_MODEL") or os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+    fallback = os.environ.get("GEMINI_FALLBACK_MODEL", "")
     headers = {"x-goog-api-key": key}
     base = "https://generativelanguage.googleapis.com/v1beta/models/"
     models = list(dict.fromkeys([model, fallback])) if fallback else [model]
@@ -166,6 +166,10 @@ def run_test_conversation(check_id, token=None):
         assessment = {} if STOP.search(message) else assess(message, state["history"], model_reader, config["offer"])
         next_state, decision = advance(state, newest["id"], message, assessment, config["offer"])
         next_state["processed"] = list(dict.fromkeys(next_state["processed"] + [m["id"] for m in pending]))
+        if decision["action"] == "wait" and next_state["status"] == "active":
+            save({"state": next_state, "last_decision": decision, "status": "active"}, "processing")
+            print('TEST_CONVERSATION {"action":"wait","sent":false}')
+            return
         if decision["action"] != "draft":
             save({"state": next_state, "last_decision": decision, "enabled": False,
                   "owner": "human" if decision["action"] == "handoff" else "sdr",

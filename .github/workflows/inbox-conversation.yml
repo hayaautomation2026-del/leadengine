@@ -24,7 +24,7 @@ jobs:
       - name: Verify live model generation with synthetic data
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-3.8-flash
+          GEMINI_MODEL: gemini-flash-latest
         run: python model_probe.py
       - name: Respond only inside the authorized test thread
         env:
@@ -35,7 +35,9 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-3.8-flash
+          GEMINI_MODEL: gemini-flash-latest
           GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
           SDR_FROM_NAME: Ameer
-        run: python inbox_conversation.py
+        run: |
+          python recover_owner_test.py
+          python inbox_conversation.py

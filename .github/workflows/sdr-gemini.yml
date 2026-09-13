@@ -60,5 +60,6 @@ jobs:
           GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
           SDR_FROM_NAME: ${{ secrets.SDR_FROM_NAME || 'Ameer' }}
           SDR_DRY_RUN: 'false'
+          INBOX_GEMINI_MODEL: gemini-flash-latest
           INBOX_TEST_CHECK_ID: eaeb8f84-e86f-470a-bae3-ac124d86c2c3
         run: python sdr_worker_gemini.py
