@@ -1,15 +1,18 @@
 """Bounded unattended inbox polling; every check writes private evidence."""
+import base64
 import os
 import re
 import time
 from datetime import datetime, timezone
-from email.utils import parseaddr, getaddresses
+from email.mime.text import MIMEText
+from email.utils import parseaddr, getaddresses, formataddr
 
 import inbox_conversation as flow
 from response_audit import record
 
 POLL_SECONDS = 30
 TRANSIENT_RETRY_SECONDS = (5, 15, 30)
+ORIGINAL_ADVANCE = flow.advance
 
 
 def is_transient(exc):
@@ -69,6 +72,43 @@ def robust_customer_messages(thread, check):
     return sorted(matches, key=lambda m: int(m.get("internalDate", 0)))
 
 
+def gmail_native_reply_payload(check, message, body):
+    """Build a normal Gmail reply and let Gmail generate the outbound Message-ID."""
+    headers = message.get("payload", {}).get("headers", [])
+    parent_id = flow.worker.header_value(headers, "Message-ID")
+    subject = flow.worker.header_value(headers, "Subject")
+    refs = flow.worker.header_value(headers, "References")
+    if not re.fullmatch(r"<[^<>\s]+>", parent_id) or any(c in subject + refs for c in "\r\n"):
+        raise ValueError("Missing or unsafe reply threading headers")
+    if not re.match(r"(?i)^\s*re:\s*", subject):
+        subject = "Re: " + subject
+    mime = MIMEText(body, "plain", "utf-8")
+    mime["To"] = check["recipient"]
+    mime["From"] = formataddr((flow.worker.FROM_NAME, check["expected_sender"]))
+    mime["Subject"] = subject
+    mime["In-Reply-To"] = parent_id
+    mime["References"] = (refs + " " + parent_id).strip()
+    return {"threadId": check["gmail_thread_id"],
+            "raw": base64.urlsafe_b64encode(mime.as_bytes()).decode().rstrip("=")}
+
+
+def format_aware_advance(state, message_id, message, assessment, offer, *, paused=False):
+    """Preserve approved copy while honoring an explicit request for bullet formatting."""
+    next_state, decision = ORIGINAL_ADVANCE(
+        state, message_id, message, assessment, offer, paused=paused
+    )
+    if (decision.get("action") == "draft"
+            and re.search(r"\b(bullet|bullets|bullet points)\b", message or "", re.I)):
+        body = str(decision.get("body") or "").strip()
+        if body:
+            parts = [part.strip() for part in re.split(r"\n\s*\n", body) if part.strip()]
+            bullet_body = "\n".join("- " + part.replace("\n", " ") for part in parts)
+            decision["body"] = bullet_body
+            if next_state.get("history") and next_state["history"][-1].get("role") == "sdr_draft":
+                next_state["history"][-1]["text"] = bullet_body
+    return next_state, decision
+
+
 def relink_controlled_thread(check_id, config):
     """Recover only the controlled test if Gmail places a valid reply in another thread."""
     checks = flow.worker.sb("GET", "sdr_inbox_checks", params={
@@ -125,6 +165,8 @@ def main():
     check_id = os.environ['INBOX_CHECK_ID']
     deadline = time.monotonic() + 18000
     flow.customer_messages = robust_customer_messages
+    flow.reply_payload = gmail_native_reply_payload
+    flow.advance = format_aware_advance
     record(check_id, 'worker_started', poll_seconds=POLL_SECONDS)
     while time.monotonic() < deadline:
         try:
