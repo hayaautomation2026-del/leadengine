@@ -14,7 +14,7 @@ from uuid import UUID
 
 import requests
 import sdr_worker as worker
-from conversation_engine import advance, assess, new_conversation, STOP
+from conversation_engine import advance, assess, new_conversation, STOP, ProviderConfigurationError
 from inbox_check import valid_email
 
 TABLE = "sdr_test_conversations"
@@ -60,7 +60,7 @@ def customer_messages(thread, check):
 def model_reader(prompt):
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise RuntimeError("AI credentials missing")
+        raise ProviderConfigurationError("AI credentials missing")
     model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
     fallback = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
     headers = {"x-goog-api-key": key}
@@ -69,7 +69,7 @@ def model_reader(prompt):
     response = None
     for index, candidate in enumerate(models):
         if not re.fullmatch(r"gemini-[a-zA-Z0-9.\-]+", candidate):
-            raise RuntimeError("Invalid model configuration")
+            raise ProviderConfigurationError("Invalid model configuration")
         if index:
             # Verify availability with the same account before attempting fallback.
             try:
@@ -91,7 +91,7 @@ def model_reader(prompt):
         print(f"TEST_AI_READ_FAILURE model={candidate} http_status={response.status_code}")
         if response.status_code == 429 or response.status_code >= 500:
             continue
-        raise RuntimeError(f"AI HTTP {response.status_code}")
+        raise ProviderConfigurationError(f"AI HTTP {response.status_code}")
     else:
         raise TransientAIError("AI temporarily unavailable")
     text = "".join(part.get("text", "") for candidate in response.json().get("candidates", [])
@@ -102,7 +102,7 @@ def model_reader(prompt):
             raise ValueError("Expected a JSON object")
     except ValueError:
         print("TEST_AI_READ_FAILURE invalid_structured_response")
-        raise RuntimeError("AI response was not a JSON object") from None
+        raise TransientAIError("AI response was not a JSON object") from None
     return text
 
 
@@ -196,6 +196,12 @@ def run_test_conversation(check_id, token=None):
         if not recorded:
             raise RuntimeError("Send completed but recording needs review")
         print("TEST_CONVERSATION " + json.dumps({"action": "replied", "thread_matches": True, "replies_sent": count}))
+    except ProviderConfigurationError:
+        save({"status": "review", "enabled": False,
+              "last_decision": {"action": "provider_configuration_error", "body": "",
+                                "reason": "AI provider configuration failed; customer message remains unprocessed",
+                                "payment_status": "not_verified"}}, "processing")
+        raise ProviderConfigurationError("AI provider configuration failed; no email sent") from None
     except TransientAIError:
         save({"status": "active"}, "processing")
         print('TEST_CONVERSATION {"action":"retry_later","sent":false}')

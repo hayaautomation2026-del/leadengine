@@ -2,7 +2,7 @@ name: Controlled AI reply test
 on:
   push:
     branches: [main]
-    paths: ['inbox_conversation.py', 'conversation_engine.py', 'test_inbox_conversation.py', '.github/workflows/inbox-conversation.yml']
+    paths: ['model_probe.py', 'inbox_conversation.py', 'conversation_engine.py', 'test_inbox_conversation.py', '.github/workflows/inbox-conversation.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,6 +21,11 @@ jobs:
       - run: python -m pip install requests==2.31.0
       - name: Test controlled reply safeguards
         run: python -m unittest -q test_inbox_conversation
+      - name: Verify live model generation with synthetic data
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: gemini-3.8-flash
+        run: python model_probe.py
       - name: Respond only inside the authorized test thread
         env:
           INBOX_CHECK_ID: eaeb8f84-e86f-470a-bae3-ac124d86c2c3

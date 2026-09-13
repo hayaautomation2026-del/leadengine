@@ -82,6 +82,22 @@ class ControlledReplyTests(unittest.TestCase):
 
     def run_flow(self): flow.run_test_conversation(CHECK)
 
+    def test_provider_configuration_error_preserves_message(self):
+        self.mocks[-1].side_effect = flow.ProviderConfigurationError("404")
+        with self.assertRaises(flow.ProviderConfigurationError): self.run_flow()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.config["state"]["processed"], [])
+        self.assertEqual(self.config["last_decision"]["action"], "provider_configuration_error")
+
+    def test_acknowledgement_waits_without_sending(self):
+        self.thread = {"messages": [message("Thank you, I will check it out.")]}
+        self.mocks[-1].return_value = json.dumps({"intent":"acknowledgement", "intent_evidence":"Thank you", "facts":{}})
+        self.mocks[-1].side_effect = None
+        self.run_flow()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.config["last_decision"]["action"], "wait")
+        self.assertEqual(self.config["state"]["facts"], {})
+
     def test_transient_provider_failure_preserves_pending_message(self):
         self.mocks[-1].side_effect = flow.TransientAIError("503")
         self.run_flow()
