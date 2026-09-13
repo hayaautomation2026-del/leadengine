@@ -8,10 +8,15 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import logging
 import re
 
 class ProviderConfigurationError(RuntimeError):
     """Provider setup failed; this is not customer intent."""
+
+
+def _norm(text):
+    return ' '.join(text.split()) if isinstance(text, str) else ''
 
 
 FIELDS = ("need", "budget", "timing", "authority")
@@ -116,7 +121,7 @@ def advance(state, message_id, message, assessment, offer, *, paused=False):
     a = assessment if isinstance(assessment, dict) else {}
     intent = a.get("intent")
     evidence = a.get("intent_evidence")
-    if intent not in INTENTS or not isinstance(evidence, str) or not evidence.strip() or evidence not in message:
+    if intent not in INTENTS or not isinstance(evidence, str) or not evidence.strip() or _norm(evidence) not in _norm(message):
         s["owner"], s["status"] = "human", "handoff"
         return done("handoff", "Could not reliably understand the reply")
     if intent == "stop":
@@ -127,17 +132,21 @@ def advance(state, message_id, message, assessment, offer, *, paused=False):
     facts = a.get("facts") if isinstance(a.get("facts"), dict) else {}
     for key in FIELDS:
         quote = facts.get(key)
-        if isinstance(quote, str) and quote.strip() and quote in message:
+        if isinstance(quote, str) and quote.strip() and _norm(quote) in _norm(message):
             if key == "budget" and re.search(r"\b(no budget|not set|unknown|not sure|haven't decided|have not decided)\b", quote, re.I):
                 s["facts"].pop(key, None)
                 continue
             s["facts"][key] = {"quote": quote, "message_id": message_id}
+        elif quote is not None:
+            logging.warning("FACT_EVIDENCE_REJECTED field=%s evidence_type=%s evidence_length=%s message_length=%s", key, type(quote).__name__, len(quote) if isinstance(quote, str) else 0, len(message))
     unknown = a.get("unknown_fields", [])
     unknown_quote = a.get("unknown_evidence")
-    if isinstance(unknown, list) and isinstance(unknown_quote, str) and unknown_quote.strip() and unknown_quote in message:
+    if isinstance(unknown, list) and isinstance(unknown_quote, str) and unknown_quote.strip() and _norm(unknown_quote) in _norm(message):
         for key in unknown:
             if key in FIELDS:
                 s["facts"].pop(key, None)
+    elif unknown or unknown_quote:
+        logging.warning("RETRACTION_EVIDENCE_REJECTED evidence_type=%s evidence_length=%s message_length=%s", type(unknown_quote).__name__, len(unknown_quote) if isinstance(unknown_quote, str) else 0, len(message))
 
     if intent in {"human", "unsupported", "unclear"} or s["turns"] >= 8:
         s["owner"], s["status"] = "human", "handoff"

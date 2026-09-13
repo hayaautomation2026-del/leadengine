@@ -5,6 +5,8 @@ Interrupted/ambiguous sends stop for review, never automatically resend.
 """
 import base64
 import json
+import logging
+import traceback
 import os
 import re
 from datetime import datetime, timezone
@@ -211,9 +213,11 @@ def run_test_conversation(check_id, token=None):
             "action": "retry_later", "reason": "AI temporarily unavailable; message remains unprocessed",
             "body": "", "payment_status": "not_verified"}}, "processing")
         print('TEST_CONVERSATION {"action":"retry_later","sent":false}')
-    except Exception:
+    except Exception as e:
+        logging.error("Exception in test conversation: type=%s\n%s", type(e).__name__,
+                      "".join(traceback.format_list(traceback.extract_tb(e.__traceback__))))
         save({"status": "review", "enabled": False})
-        raise RuntimeError("Test conversation needs review; no automatic resend") from None
+        raise RuntimeError("Test conversation needs review; no automatic resend") from RuntimeError(type(e).__name__)
 
 
 if __name__ == "__main__":
