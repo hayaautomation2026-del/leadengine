@@ -62,14 +62,38 @@ def model_reader(prompt):
     if not key:
         raise RuntimeError("AI credentials missing")
     model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
-    response = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-        headers={"x-goog-api-key": key}, json={"contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}, timeout=60)
-    if not response.ok:
-        print(f"TEST_AI_READ_FAILURE http_status={response.status_code}")
+    fallback = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
+    headers = {"x-goog-api-key": key}
+    base = "https://generativelanguage.googleapis.com/v1beta/models/"
+    models = list(dict.fromkeys([model, fallback])) if fallback else [model]
+    response = None
+    for index, candidate in enumerate(models):
+        if not re.fullmatch(r"gemini-[a-zA-Z0-9.\-]+", candidate):
+            raise RuntimeError("Invalid model configuration")
+        if index:
+            # Verify availability with the same account before attempting fallback.
+            try:
+                metadata = requests.get(base + candidate, headers=headers, timeout=10)
+                if not metadata.ok or "generateContent" not in metadata.json().get("supportedGenerationMethods", []):
+                    raise TransientAIError("Backup model is unavailable")
+            except (requests.RequestException, ValueError):
+                raise TransientAIError("Could not verify backup model") from None
+        try:
+            response = requests.post(base + candidate + ":generateContent",
+                headers=headers, json={"contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}, timeout=20)
+        except (requests.Timeout, requests.ConnectionError):
+            print(f"TEST_AI_READ_FAILURE model={candidate} transport_error=true")
+            continue
+        if response.ok:
+            print(f"TEST_AI_MODEL_USED model={candidate} fallback={str(bool(index)).lower()}")
+            break
+        print(f"TEST_AI_READ_FAILURE model={candidate} http_status={response.status_code}")
         if response.status_code == 429 or response.status_code >= 500:
-            raise TransientAIError("AI temporarily unavailable")
+            continue
         raise RuntimeError(f"AI HTTP {response.status_code}")
+    else:
+        raise TransientAIError("AI temporarily unavailable")
     text = "".join(part.get("text", "") for candidate in response.json().get("candidates", [])
                    for part in candidate.get("content", {}).get("parts", []))
     try:

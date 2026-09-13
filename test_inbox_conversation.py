@@ -186,3 +186,34 @@ class ControlledReplyTests(unittest.TestCase):
 
 
 if __name__ == "__main__": unittest.main()
+
+
+class ProviderRecoveryTests(unittest.TestCase):
+    def response(self, code, data):
+        from unittest.mock import Mock
+        r = Mock(ok=code == 200, status_code=code)
+        r.json.return_value = data
+        return r
+
+    def test_primary_outage_uses_verified_backup(self):
+        good = self.response(200, {"candidates":[{"content":{"parts":[{"text":'{"intent":"price"}'}]}}]})
+        with patch.dict(flow.os.environ, {"GEMINI_API_KEY":"test", "GEMINI_MODEL":"gemini-3.8-flash",
+                                          "GEMINI_FALLBACK_MODEL":"gemini-2.5-flash"}),              patch.object(flow.requests, "post", side_effect=[self.response(503, {}), good]) as post,              patch.object(flow.requests, "get", return_value=self.response(200, {"supportedGenerationMethods":["generateContent"]})):
+            self.assertEqual(json.loads(flow.model_reader("test"))["intent"], "price")
+            self.assertEqual(post.call_count, 2)
+            self.assertIn("gemini-2.5-flash", post.call_args.args[0])
+
+    def test_backup_unavailable_does_not_guess_a_model(self):
+        with patch.dict(flow.os.environ, {"GEMINI_API_KEY":"test"}),              patch.object(flow.requests, "post", return_value=self.response(503, {})) as post,              patch.object(flow.requests, "get", return_value=self.response(404, {})):
+            with self.assertRaises(flow.TransientAIError): flow.model_reader("test")
+            self.assertEqual(post.call_count, 1)
+
+    def test_auth_failure_is_not_retried(self):
+        with patch.dict(flow.os.environ, {"GEMINI_API_KEY":"test"}),              patch.object(flow.requests, "post", return_value=self.response(401, {})) as post:
+            with self.assertRaises(RuntimeError): flow.model_reader("test")
+            self.assertEqual(post.call_count, 1)
+
+    def test_two_outages_leave_work_for_next_run(self):
+        with patch.dict(flow.os.environ, {"GEMINI_API_KEY":"test"}),              patch.object(flow.requests, "post", return_value=self.response(503, {})) as post,              patch.object(flow.requests, "get", return_value=self.response(200, {"supportedGenerationMethods":["generateContent"]})):
+            with self.assertRaises(flow.TransientAIError): flow.model_reader("test")
+            self.assertEqual(post.call_count, 2)

@@ -23,7 +23,7 @@ jobs:
         run: python -m unittest -q test_inbox_conversation
       - name: Respond only inside the authorized test thread
         env:
-          INBOX_CHECK_ID: d2d77c87-ec8a-4878-a5dd-e6e9509a257b
+          INBOX_CHECK_ID: eaeb8f84-e86f-470a-bae3-ac124d86c2c3
           SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
