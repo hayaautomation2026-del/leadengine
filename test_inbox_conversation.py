@@ -100,6 +100,22 @@ class ControlledReplyTests(unittest.TestCase):
         self.assertTrue(self.config["enabled"])
         self.assertEqual(self.config["status"], "active")
 
+    def test_audit_records_response_and_timing(self):
+        events = []
+        flow.run_test_conversation(CHECK, audit=lambda event, **data: events.append((event, data)))
+        sent = next(data for event, data in events if event == "sent")
+        self.assertEqual(sent["output_id"], "out1")
+        self.assertGreaterEqual(sent["ai_seconds"], 0)
+        self.assertGreaterEqual(sent["response_seconds"], sent["processing_seconds"])
+        self.assertTrue(sent["body"])
+
+    def test_audit_failure_prevents_send(self):
+        def broken(*args, **kwargs): raise RuntimeError("audit down")
+        with self.assertRaises(RuntimeError): flow.run_test_conversation(CHECK, audit=broken)
+        self.assertEqual(self.sent, [])
+        self.assertFalse(self.config["enabled"])
+        self.assertEqual(self.config["status"], "review")
+
     def test_transient_provider_failure_preserves_pending_message(self):
         self.mocks[-1].side_effect = flow.TransientAIError("503")
         self.run_flow()

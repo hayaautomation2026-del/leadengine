@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import traceback
+import time
 import os
 import re
 from datetime import datetime, timezone
@@ -20,6 +21,7 @@ from conversation_engine import advance, assess, new_conversation, STOP, Provide
 from inbox_check import valid_email
 
 TABLE = "sdr_test_conversations"
+PROVIDER_EVENTS = []
 
 
 class TransientAIError(Exception):
@@ -60,6 +62,7 @@ def customer_messages(thread, check):
 
 
 def model_reader(prompt):
+    PROVIDER_EVENTS.clear()
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         raise ProviderConfigurationError("AI credentials missing")
@@ -87,6 +90,7 @@ def model_reader(prompt):
         except (requests.Timeout, requests.ConnectionError):
             print(f"TEST_AI_READ_FAILURE model={candidate} transport_error=true")
             continue
+        PROVIDER_EVENTS.append({"model": candidate, "http_status": response.status_code})
         if response.ok:
             print(f"TEST_AI_MODEL_USED model={candidate} fallback={str(bool(index)).lower()}")
             break
@@ -125,7 +129,8 @@ def reply_payload(check, message, body):
     return {"threadId": check["gmail_thread_id"], "raw": base64.urlsafe_b64encode(mime.as_bytes()).decode().rstrip("=")}
 
 
-def run_test_conversation(check_id, token=None):
+def run_test_conversation(check_id, token=None, audit=None):
+    audit = audit or (lambda event, **data: None)
     UUID(check_id)
     config = read_config(check_id)
     if not allowed(config, worker.load_settings()) or config["status"] != "active":
@@ -144,11 +149,19 @@ def run_test_conversation(check_id, token=None):
     state = config.get("state") or new_conversation()
     pending = [m for m in customer_messages(thread, check) if m["id"] not in state["processed"]]
     if not pending:
+        audit("inbox_checked", pending=0)
         return
     newest = pending[-1]
+    received_at = datetime.fromtimestamp(int(newest["internalDate"])/1000, timezone.utc)
+    detected_at = datetime.now(timezone.utc)
+    started = time.monotonic()
+    metrics = {"message_id": newest["id"], "received_at": received_at.isoformat(),
+               "detected_at": detected_at.isoformat(),
+               "inbox_wait_seconds": (detected_at-received_at).total_seconds()}
     # A manual sender reply after the customer message means the owner took over.
     later = [m for m in thread.get("messages", []) if int(m.get("internalDate", 0)) > int(newest.get("internalDate", 0))]
     if later:
+        audit("human_takeover", **metrics)
         worker.sb("PATCH", TABLE, params={"check_id": f"eq.{check_id}", "version": f"eq.{config['version']}"},
                   body={"owner": "human", "enabled": False, "updated_at": worker.now()})
         return
@@ -163,10 +176,20 @@ def run_test_conversation(check_id, token=None):
         if status:
             params["status"] = "eq." + status
         return worker.sb("PATCH", TABLE, params=params, body={**body, "updated_at": worker.now()}, prefer="return=representation") or []
+    def audit_failure(event, **extra):
+        try:
+            audit(event, **metrics, **extra)
+        except Exception:
+            logging.error("Private audit unavailable; conversation will not send again automatically")
     try:
         message = "\n".join(latest_text(m) for m in pending)
+        audit("received", **metrics, message=message)
+        ai_started = time.monotonic()
         assessment = {} if STOP.search(message) else assess(message, state["history"], model_reader, config["offer"])
+        metrics["ai_seconds"] = time.monotonic() - ai_started
+        metrics["provider_attempts"] = list(PROVIDER_EVENTS)
         next_state, decision = advance(state, newest["id"], message, assessment, config["offer"])
+        audit("decision", **metrics, assessment=assessment, decision=decision)
         decision["assessment"] = assessment  # Private database only; never public logs.
         next_state["processed"] = list(dict.fromkeys(next_state["processed"] + [m["id"] for m in pending]))
         if decision["action"] == "wait" and next_state["status"] == "active":
@@ -194,7 +217,10 @@ def run_test_conversation(check_id, token=None):
             body={"status": "sending", "state": next_state, "last_decision": decision}, prefer="return=representation") or []
         if not reserved:
             return
+        audit("send_started", **metrics, body=decision["body"])
+        send_started = time.monotonic()
         sent = worker.gmail_api(token, "POST", "messages/send", body=payload)
+        sent_at = datetime.now(timezone.utc)
         if not sent.get("id") or sent.get("threadId") != check["gmail_thread_id"]:
             raise RuntimeError("Reply threading not confirmed")
         count = config["replies_sent"] + 1
@@ -202,19 +228,27 @@ def run_test_conversation(check_id, token=None):
                          "enabled": count < config["reply_cap"]}, "sending")
         if not recorded:
             raise RuntimeError("Send completed but recording needs review")
+        audit("sent", **metrics, output_id=sent["id"], thread_id=sent["threadId"],
+              body=decision["body"], sent_at=sent_at.isoformat(),
+              send_seconds=time.monotonic()-send_started,
+              processing_seconds=time.monotonic()-started,
+              response_seconds=(sent_at-received_at).total_seconds())
         print("TEST_CONVERSATION " + json.dumps({"action": "replied", "thread_matches": True, "replies_sent": count}))
     except ProviderConfigurationError:
+        audit_failure("provider_configuration_error")
         save({"status": "review", "enabled": False,
               "last_decision": {"action": "provider_configuration_error", "body": "",
                                 "reason": "AI provider configuration failed; customer message remains unprocessed",
                                 "payment_status": "not_verified"}}, "processing")
         raise ProviderConfigurationError("AI provider configuration failed; no email sent") from None
     except TransientAIError:
+        audit_failure("retry_later")
         save({"status": "active", "last_decision": {
             "action": "retry_later", "reason": "AI temporarily unavailable; message remains unprocessed",
             "body": "", "payment_status": "not_verified"}}, "processing")
         print('TEST_CONVERSATION {"action":"retry_later","sent":false}')
     except Exception as e:
+        audit_failure("error", error_type=type(e).__name__)
         logging.error("Exception in test conversation: type=%s\n%s", type(e).__name__,
                       "".join(traceback.format_list(traceback.extract_tb(e.__traceback__))))
         save({"status": "review", "enabled": False})
@@ -222,4 +256,6 @@ def run_test_conversation(check_id, token=None):
 
 
 if __name__ == "__main__":
-    run_test_conversation(os.environ["INBOX_CHECK_ID"])
+    from response_audit import record
+    check_id = os.environ["INBOX_CHECK_ID"]
+    run_test_conversation(check_id, audit=lambda event, **data: record(check_id, event, **data))
