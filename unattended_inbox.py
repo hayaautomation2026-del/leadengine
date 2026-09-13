@@ -46,13 +46,6 @@ def with_transient_retry(check_id, operation, fn):
             time.sleep(delay)
 
 
-def normalized_subject(value):
-    value = str(value or "").strip().lower()
-    while value.startswith("re:"):
-        value = value[3:].strip()
-    return value
-
-
 def recipient_addresses(headers):
     values = []
     for name in ("To", "Cc", "Delivered-To", "X-Original-To"):
@@ -77,7 +70,7 @@ def robust_customer_messages(thread, check):
 
 
 def relink_controlled_thread(check_id, config):
-    """Recover only the controlled test if Gmail places the exact reply in another thread."""
+    """Recover only the controlled test if Gmail places a valid reply in another thread."""
     checks = flow.worker.sb("GET", "sdr_inbox_checks", params={
         "select": "id,recipient,expected_sender,subject,gmail_thread_id,sent_at",
         "id": f"eq.{check_id}",
@@ -87,29 +80,28 @@ def relink_controlled_thread(check_id, config):
     if not checks:
         return
     check = checks[0]
-    if not all(check.get(k) for k in ("recipient", "expected_sender", "subject", "gmail_thread_id")):
+    if not all(check.get(k) for k in ("recipient", "expected_sender", "gmail_thread_id", "sent_at")):
         return
 
     token = flow.worker.gmail_token()
-    # Search broadly by the exact test sender first. Header filtering below keeps this bounded.
     query = f'from:{check["recipient"]} newer_than:2d'
     found = flow.worker.gmail_api(token, "GET", "messages", params={"q": query, "maxResults": 25}) or {}
     processed = set((config.get("state") or {}).get("processed") or [])
+    sent_cutoff_ms = int(datetime.fromisoformat(str(check["sent_at"]).replace("Z", "+00:00")).timestamp() * 1000)
     candidates = []
 
     for item in found.get("messages", []):
         if item.get("id") in processed:
             continue
         msg = flow.worker.gmail_api(token, "GET", f'messages/{item["id"]}', params={"format": "metadata"})
+        if int(msg.get("internalDate", 0)) <= sent_cutoff_ms:
+            continue
         headers = msg.get("payload", {}).get("headers", [])
         sender = parseaddr(flow.worker.header_value(headers, "From"))[1].lower()
         recipients = recipient_addresses(headers)
-        subject = flow.worker.header_value(headers, "Subject")
         if sender != check["recipient"].lower():
             continue
         if check["expected_sender"].lower() not in recipients:
-            continue
-        if normalized_subject(subject) != normalized_subject(check["subject"]):
             continue
         candidates.append(msg)
 
@@ -132,7 +124,6 @@ def relink_controlled_thread(check_id, config):
 def main():
     check_id = os.environ['INBOX_CHECK_ID']
     deadline = time.monotonic() + 18000
-    # Hotfix the bounded test matcher only; real prospect sending remains disabled.
     flow.customer_messages = robust_customer_messages
     record(check_id, 'worker_started', poll_seconds=POLL_SECONDS)
     while time.monotonic() < deadline:
