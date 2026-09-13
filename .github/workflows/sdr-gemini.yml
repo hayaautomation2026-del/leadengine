@@ -61,5 +61,5 @@ jobs:
           SDR_FROM_NAME: ${{ secrets.SDR_FROM_NAME || 'Ameer' }}
           SDR_DRY_RUN: 'false'
           INBOX_GEMINI_MODEL: gemini-flash-latest
-          INBOX_TEST_CHECK_ID: eaeb8f84-e86f-470a-bae3-ac124d86c2c3
+          INBOX_TEST_CHECK_ID: 07dfa044-4beb-48ec-82e9-b66dd8b7e909
         run: python sdr_worker_gemini.py

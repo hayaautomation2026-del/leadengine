@@ -27,7 +27,7 @@ jobs:
         run: python -m unittest -q test_inbox_check
       - name: Send the requested package test once and verify it
         env:
-          INBOX_CHECK_ID: eaeb8f84-e86f-470a-bae3-ac124d86c2c3
+          INBOX_CHECK_ID: 07dfa044-4beb-48ec-82e9-b66dd8b7e909
           SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
