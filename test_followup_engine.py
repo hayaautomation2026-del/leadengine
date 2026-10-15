@@ -267,5 +267,168 @@ class SDRWorkerTests(unittest.TestCase):
         self.assertIn("Reply personally now", sent[0][3])
 
 
+
+
+class ReplyAndBounceRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.original_sb = sdr_worker.sb
+        self.original_ai = sdr_worker.openai_text
+        self.original_gmail = sdr_worker.gmail_api
+        self.original_dry_run = sdr_worker.DRY_RUN
+        self.original_sender = sdr_worker.GMAIL_FROM_EMAIL
+        sdr_worker.DRY_RUN = True
+        sdr_worker.GMAIL_FROM_EMAIL = "outreach@agency.test"
+
+    def tearDown(self):
+        sdr_worker.sb = self.original_sb
+        sdr_worker.openai_text = self.original_ai
+        sdr_worker.gmail_api = self.original_gmail
+        sdr_worker.DRY_RUN = self.original_dry_run
+        sdr_worker.GMAIL_FROM_EMAIL = self.original_sender
+
+    @staticmethod
+    def encoded(text):
+        return base64.urlsafe_b64encode(text.encode()).decode().rstrip("=")
+
+    def test_read_reply_is_discovered_once_across_paginated_results(self):
+        events = []
+        def gmail(token, method, path, *, params=None, body=None):
+            if method == "GET" and path == "messages":
+                events.append(("search", dict(params)))
+                if not params.get("pageToken"):
+                    return {"messages": [{"id": "read-reply"}], "nextPageToken": "next-50"}
+                self.assertEqual(params["pageToken"], "next-50")
+                return {"messages": [{"id": "old-processed-reply"}]}
+            if method == "GET" and path == "messages/read-reply":
+                return {"threadId": "thread-1", "payload": {
+                    "mimeType": "text/plain",
+                    "headers": [
+                        {"name": "From", "value": "Prospect <prospect@example.com>"},
+                        {"name": "Subject", "value": "Re: Question"},
+                    ],
+                    "body": {"data": self.encoded("Please send details.")},
+                }}
+            if method == "POST" and path == "messages/read-reply/modify":
+                events.append(("mark-read", body))
+                return {}
+            self.fail(f"Unexpected Gmail call {method} {path}")
+
+        def sb(method, path, *, params=None, body=None, prefer=None):
+            if method == "GET" and path == "sdr_email_messages":
+                return [{"id": "already-recorded"}] if params["gmail_message_id"] == "eq.old-processed-reply" else []
+            if method == "GET" and path == "leads":
+                return [{"id": "lead-1", "business_name": "Prospect", "email": "prospect@example.com"}]
+            if method == "PATCH" and path == "leads":
+                events.append(("stop-followup", body))
+                return None
+            if method == "POST" and path == "sdr_email_messages":
+                events.append(("record", body))
+                return None
+            self.fail(f"Unexpected Supabase call {method} {path}")
+
+        sdr_worker.gmail_api = gmail
+        sdr_worker.sb = sb
+        sdr_worker.openai_text = lambda prompt: '{"classification":"warm","buying_intent":35,"summary":"Asks for details"}'
+        sdr_worker.process_replies("token")
+        searches = [value for action, value in events if action == "search"]
+        self.assertEqual(len(searches), 2)
+        self.assertEqual(searches[0]["q"], "newer_than:7d -from:me in:inbox")
+        self.assertEqual(searches[0]["maxResults"], 50)
+        self.assertNotIn("is:unread", searches[0]["q"])
+        self.assertEqual(len([x for x in events if x[0] == "record"]), 1)
+        self.assertLess([x[0] for x in events].index("record"), [x[0] for x in events].index("mark-read"))
+        self.assertTrue(any(event[0] == "stop-followup" and event[1]["followup_due_at"] is None for event in events))
+
+    def test_bounce_header_body_and_thread_lookup_suppress_prospect(self):
+        for source in ("header", "body", "thread"):
+            with self.subTest(source=source):
+                events = []
+                extra = [{"name": "X-Failed-Recipients", "value": "prospect@example.com"}] if source == "header" else []
+                content = ("Final-Recipient: rfc822; prospect@example.com" if source == "body"
+                           else "Undelivered mail returned to sender")
+                def gmail(token, method, path, *, params=None, body=None):
+                    if method == "GET" and path == "messages":
+                        return {"messages": [{"id": "bounce-1"}]}
+                    if method == "GET" and path == "messages/bounce-1":
+                        return {"threadId": "thread-1", "payload": {
+                            "mimeType": "text/plain",
+                            "headers": [
+                                {"name": "From", "value": "Mail Delivery Subsystem <mailer-daemon@mx.test>"},
+                                {"name": "Subject", "value": "Delivery Status Notification (Failure)"},
+                            ] + extra,
+                            "body": {"data": self.encoded(content)},
+                        }}
+                    if method == "POST" and path == "messages/bounce-1/modify":
+                        events.append(("mark-read", body))
+                        return {}
+                    self.fail(f"Unexpected Gmail call {method} {path}")
+
+                def sb(method, path, *, params=None, body=None, prefer=None):
+                    if method == "GET" and path == "sdr_email_messages":
+                        if params.get("direction") == "eq.inbound":
+                            return []
+                        self.assertEqual(source, "thread")
+                        self.assertEqual(params["gmail_thread_id"], "eq.thread-1")
+                        return [{"lead_id": "lead-1", "to_email": "prospect@example.com"}]
+                    if method == "GET" and path == "leads":
+                        if source == "thread":
+                            self.assertEqual(params["id"], "eq.lead-1")
+                        else:
+                            self.assertEqual(params["email"], "eq.prospect@example.com")
+                        return [{"id": "lead-1", "business_name": "Prospect", "email": "prospect@example.com"}]
+                    if method == "POST" and path == "sdr_suppressions":
+                        events.append(("suppress", body))
+                        return None
+                    if method == "PATCH" and path == "leads":
+                        events.append(("stop-followup", body))
+                        return None
+                    if method == "POST" and path == "sdr_email_messages":
+                        events.append(("record", body))
+                        return None
+                    self.fail(f"Unexpected Supabase call {method} {path}")
+
+                sdr_worker.gmail_api = gmail
+                sdr_worker.sb = sb
+                sdr_worker.openai_text = lambda prompt: self.fail("DSN must not require AI")
+                sdr_worker.process_replies("token")
+                self.assertEqual([e[0] for e in events],
+                                 ["suppress", "stop-followup", "record", "mark-read"])
+                self.assertEqual(events[0][1], {"email": "prospect@example.com", "reason": "bounce"})
+                self.assertEqual(events[1][1]["outreach_status"], "suppressed")
+                self.assertIsNone(events[1][1]["followup_due_at"])
+                self.assertEqual(events[2][1]["ai_classification"], "bounce")
+                self.assertEqual(events[2][1]["lead_id"], "lead-1")
+                self.assertEqual(events[2][1]["gmail_message_id"], "bounce-1")
+
+    def test_failed_persistence_does_not_mark_message_read(self):
+        def gmail(token, method, path, *, params=None, body=None):
+            if method == "GET" and path == "messages":
+                return {"messages": [{"id": "reply-1"}]}
+            if method == "GET" and path == "messages/reply-1":
+                return {"payload": {
+                    "mimeType": "text/plain",
+                    "headers": [{"name": "From", "value": "prospect@example.com"}],
+                    "body": {"data": self.encoded("Interested, thanks")},
+                }}
+            self.fail("Gmail message was marked read before Supabase success")
+
+        def sb(method, path, *, params=None, body=None, prefer=None):
+            if method == "GET" and path == "sdr_email_messages":
+                return []
+            if method == "GET" and path == "leads":
+                return [{"id": "lead-1", "email": "prospect@example.com"}]
+            if method == "PATCH" and path == "leads":
+                return None
+            if method == "POST" and path == "sdr_email_messages":
+                raise RuntimeError("Supabase unavailable")
+            self.fail(f"Unexpected call {method} {path}")
+
+        sdr_worker.gmail_api = gmail
+        sdr_worker.sb = sb
+        sdr_worker.openai_text = lambda prompt: '{"classification":"warm"}'
+        with self.assertRaisesRegex(RuntimeError, "Supabase unavailable"):
+            sdr_worker.process_replies("token")
+
+
 if __name__ == "__main__":
     unittest.main()

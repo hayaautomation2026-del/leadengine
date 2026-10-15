@@ -376,67 +376,201 @@ def daily_remaining(settings):
     return max(0, cap - len(sent_today)), cap
 
 
+BOUNCE_SUBJECT_MARKERS = (
+    "delivery status notification", "undeliverable",
+    "mail delivery subsystem", "failure notice",
+)
+EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
+LEAD_REPLY_FIELDS = "id,business_name,niche_id,email,phone_number,whatsapp_number,city,country,website_url"
+
+
+def is_delivery_failure(sender_email, subject, headers):
+    """Recognize DSNs without trusting an LLM to classify a mailer daemon."""
+    local_part = (sender_email or "").split("@", 1)[0].lower()
+    if local_part.startswith(("mailer-daemon", "postmaster")):
+        return True
+    if any(marker in (subject or "").lower() for marker in BOUNCE_SUBJECT_MARKERS):
+        return True
+    if any(header_value(headers, name) for name in
+           ("Final-Recipient", "Original-Recipient", "X-Failed-Recipients")):
+        return True
+    return "delivery-status" in header_value(headers, "Content-Type").lower()
+
+
+def bounce_recipient_emails(payload, body):
+    """Prefer failed-recipient metadata; support multipart delivery-status and prose."""
+    candidates = []
+
+    def collect(text):
+        for found in EMAIL_PATTERN.findall(text or ""):
+            addr = found.lower()
+            if addr not in candidates:
+                candidates.append(addr)
+
+    def visit(part):
+        headers = part.get("headers") or []
+        for name in ("Final-Recipient", "Original-Recipient", "X-Failed-Recipients"):
+            collect(header_value(headers, name))
+        mime = (part.get("mimeType") or "").lower()
+        if mime in ("message/delivery-status", "text/rfc822-headers"):
+            collect(decode_b64url((part.get("body") or {}).get("data")))
+        for child in part.get("parts") or []:
+            visit(child)
+
+    visit(payload)
+    # Failure lines are more trustworthy than arbitrary addresses in a quoted email.
+    for line in (body or "").splitlines():
+        if re.search(r"recipient|undeliver|delivery|fail|address|unknown user|not found|to:", line, re.I):
+            collect(line)
+    # Some providers supply only a short human-readable bounce with no labeled line.
+    collect(body)
+    return candidates
+
+
+def find_bounced_lead(payload, body, thread_id):
+    """Resolve a failed recipient by headers/body first, outbound Gmail thread second."""
+    for candidate in bounce_recipient_emails(payload, body):
+        if candidate == (GMAIL_FROM_EMAIL or "").lower():
+            continue
+        matches = sb("GET", "leads", params={
+            "select": LEAD_REPLY_FIELDS,
+            "email": f"eq.{candidate}",
+            "limit": "1",
+        }) or []
+        if matches:
+            return matches[0]
+
+    if thread_id:
+        outbound = sb("GET", "sdr_email_messages", params={
+            "select": "lead_id,to_email",
+            "gmail_thread_id": f"eq.{thread_id}",
+            "direction": "eq.outbound",
+            "status": "eq.sent",
+            "limit": "1",
+        }) or []
+        if outbound and outbound[0].get("lead_id"):
+            leads = sb("GET", "leads", params={
+                "select": LEAD_REPLY_FIELDS,
+                "id": f"eq.{outbound[0]['lead_id']}",
+                "limit": "1",
+            }) or []
+            if leads:
+                return leads[0]
+    return None
+
+
 def process_replies(token):
-    data = gmail_api(token, "GET", "messages", params={"q": "is:unread in:inbox newer_than:2d -from:me", "maxResults": 50})
     processed = 0
-    for item in data.get("messages", []):
-        msg_id = item["id"]
+    next_page = None
+    while True:
+        params = {
+            "q": "newer_than:7d -from:me in:inbox",
+            "maxResults": 50,
+        }
+        if next_page:
+            params["pageToken"] = next_page
+        data = gmail_api(token, "GET", "messages", params=params) or {}
+        for item in data.get("messages") or []:
+            msg_id = item["id"]
+            already_processed = sb("GET", "sdr_email_messages", params={
+                "select": "id",
+                "gmail_message_id": f"eq.{msg_id}",
+                "direction": "eq.inbound",
+                "limit": "1",
+            }) or []
+            if already_processed:
+                continue
 
-        already_processed = sb("GET", "sdr_email_messages", params={
-            "select": "id",
-            "gmail_message_id": f"eq.{msg_id}",
-            "direction": "eq.inbound",
-            "limit": "1",
-        }) or []
-        if already_processed:
-            gmail_api(token, "POST", f"messages/{msg_id}/modify", body={"removeLabelIds": ["UNREAD"]})
-            continue
+            msg = gmail_api(token, "GET", f"messages/{msg_id}", params={"format": "full"})
+            payload = msg.get("payload", {})
+            headers = payload.get("headers", [])
+            sender = header_value(headers, "From")
+            sender_match = EMAIL_PATTERN.search(sender)
+            sender_email = sender_match.group(0).lower() if sender_match else ""
+            body = extract_text(payload).strip()
+            subject = header_value(headers, "Subject")
+            thread_id = msg.get("threadId")
 
-        msg = gmail_api(token, "GET", f"messages/{msg_id}", params={"format": "full"})
-        payload = msg.get("payload", {})
-        headers = payload.get("headers", [])
-        sender = header_value(headers, "From")
-        sender_email = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", sender, re.I)
-        if not sender_email:
-            continue
-        email = sender_email.group(0).lower()
-        leads = sb("GET", "leads", params={
-            "select": "id,business_name,niche_id,email,phone_number,whatsapp_number,city,country,website_url",
-            "email": f"eq.{email}",
-            "limit": "1",
-        }) or []
-        if not leads:
-            continue
-        lead = leads[0]
-        body = extract_text(payload).strip()
-        subject = header_value(headers, "Subject")
-        cls = classify_reply(lead, body)
-        classification = cls.get("classification", "cold")
-        if classification == "unsubscribe":
-            sb("POST", "sdr_suppressions", body={"email": email, "reason": "unsubscribe"}, prefer="resolution=ignore-duplicates")
-        outreach_status = {"hot": "hot", "warm": "warm", "cold": "stopped", "unsubscribe": "suppressed", "bounce": "suppressed"}.get(classification, "warm")
-        sb("POST", "sdr_email_messages", body={
-            "lead_id": lead["id"], "direction": "inbound", "gmail_message_id": msg_id,
-            "gmail_thread_id": msg.get("threadId"), "from_email": email,
-            "to_email": GMAIL_FROM_EMAIL, "subject": subject,
-            "body_text": body[:12000], "status": "processed", "ai_classification": classification,
-            "ai_summary": str(cls.get("summary", ""))[:500], "buying_intent": cls.get("buying_intent"),
-            "received_at": now(), "processed_at": now()
-        }, prefer="return=minimal")
-        sb("PATCH", "leads", params={"id": f"eq.{lead['id']}"}, body={
-            "outreach_status": outreach_status,
-            "followup_due_at": None,
-            "last_checked_at": now(),
-        })
+            if is_delivery_failure(sender_email, subject, headers):
+                lead = find_bounced_lead(payload, body, thread_id)
+                if not lead or not lead.get("email"):
+                    print(f"Unmatched delivery failure {msg_id}; left unread for review")
+                    continue
+                failed_email = lead["email"].strip().lower()
+                # Apply stop controls BEFORE recording the message. On partial
+                # Supabase failure, the next run can retry the entire bounce.
+                sb("POST", "sdr_suppressions", body={
+                    "email": failed_email, "reason": "bounce",
+                }, prefer="resolution=ignore-duplicates")
+                sb("PATCH", "leads", params={"id": f"eq.{lead['id']}"}, body={
+                    "outreach_status": "suppressed",
+                    "followup_due_at": None,
+                    "last_checked_at": now(),
+                })
+                sb("POST", "sdr_email_messages", body={
+                    "lead_id": lead["id"], "direction": "inbound",
+                    "gmail_message_id": msg_id, "gmail_thread_id": thread_id,
+                    "from_email": sender_email, "to_email": GMAIL_FROM_EMAIL,
+                    "subject": subject, "body_text": body[:12000],
+                    "status": "processed", "ai_classification": "bounce",
+                    "ai_summary": f"Delivery failure for {failed_email}",
+                    "received_at": now(), "processed_at": now(),
+                }, prefer="return=minimal")
+                gmail_api(token, "POST", f"messages/{msg_id}/modify",
+                          body={"removeLabelIds": ["UNREAD"]})
+                processed += 1
+                continue
 
-        if classification == "hot":
-            try:
-                notify_hot_handoff(token, lead, subject, body, cls)
-            except Exception as exc:
-                print(f"HOT handoff alert failed for {email}: {exc}")
+            if not sender_email:
+                continue
+            leads = sb("GET", "leads", params={
+                "select": LEAD_REPLY_FIELDS,
+                "email": f"eq.{sender_email}",
+                "limit": "1",
+            }) or []
+            if not leads:
+                continue
+            lead = leads[0]
+            cls = classify_reply(lead, body)
+            classification = cls.get("classification", "cold")
+            if classification in ("unsubscribe", "bounce"):
+                sb("POST", "sdr_suppressions", body={
+                    "email": sender_email, "reason": classification,
+                }, prefer="resolution=ignore-duplicates")
+            outreach_status = {
+                "hot": "hot", "warm": "warm", "cold": "stopped",
+                "unsubscribe": "suppressed", "bounce": "suppressed",
+            }.get(classification, "warm")
+            # Stop future follow-ups before acknowledging processing.
+            sb("PATCH", "leads", params={"id": f"eq.{lead['id']}"}, body={
+                "outreach_status": outreach_status,
+                "followup_due_at": None,
+                "last_checked_at": now(),
+            })
+            sb("POST", "sdr_email_messages", body={
+                "lead_id": lead["id"], "direction": "inbound",
+                "gmail_message_id": msg_id, "gmail_thread_id": thread_id,
+                "from_email": sender_email, "to_email": GMAIL_FROM_EMAIL,
+                "subject": subject, "body_text": body[:12000],
+                "status": "processed", "ai_classification": classification,
+                "ai_summary": str(cls.get("summary", ""))[:500],
+                "buying_intent": cls.get("buying_intent"),
+                "received_at": now(), "processed_at": now(),
+            }, prefer="return=minimal")
 
-        gmail_api(token, "POST", f"messages/{msg_id}/modify", body={"removeLabelIds": ["UNREAD"]})
-        processed += 1
+            if classification == "hot":
+                try:
+                    notify_hot_handoff(token, lead, subject, body, cls)
+                except Exception as exc:
+                    print(f"HOT handoff alert failed for {sender_email}: {exc}")
+
+            # Gmail is marked read only after the inbound row was saved.
+            gmail_api(token, "POST", f"messages/{msg_id}/modify",
+                      body={"removeLabelIds": ["UNREAD"]})
+            processed += 1
+        next_page = data.get("nextPageToken")
+        if not next_page:
+            break
     print(f"SDR replies processed: {processed}")
 
 
