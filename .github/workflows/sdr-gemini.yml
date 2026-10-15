@@ -89,12 +89,17 @@ jobs:
           assert settings.get('sending_enabled') is False or settings.get('kill_switch') is True, 'SAFETY_GATE_FAIL sending not disabled'
           print('SUPABASE_REST_OK; SENDING_DISABLED_VERIFIED', flush=True)
 
-          token = worker.gmail_token()
-          profile = worker.gmail_api(token, 'GET', 'profile')
-          assert profile.get('emailAddress'), 'GMAIL_PROFILE_MISSING'
-          inbox = worker.gmail_api(token, 'GET', 'messages', params={'maxResults': 1})
-          assert isinstance(inbox, dict), 'GMAIL_INBOX_READ_INVALID'
-          print('GOOGLE_OAUTH_REFRESH_OK; GMAIL_INBOX_READ_OK', flush=True)
+          failures = []
+          try:
+              token = worker.gmail_token()
+              profile = worker.gmail_api(token, 'GET', 'profile')
+              assert profile.get('emailAddress'), 'GMAIL_PROFILE_MISSING'
+              inbox = worker.gmail_api(token, 'GET', 'messages', params={'maxResults': 1})
+              assert isinstance(inbox, dict), 'GMAIL_INBOX_READ_INVALID'
+              print('GOOGLE_OAUTH_REFRESH_OK; GMAIL_INBOX_READ_OK', flush=True)
+          except Exception as exc:
+              print('GMAIL_OAUTH_OR_INBOX_FAILED: ' + str(exc), flush=True)
+              failures.append('gmail')
 
           model = os.environ['GEMINI_MODEL']
           url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent'
@@ -114,6 +119,8 @@ jobs:
               if response.status_code not in (429, 500, 502, 503, 504) or attempt == 2:
                   raise RuntimeError('GEMINI_CONFIGURED_MODEL_FAILED HTTP ' + str(response.status_code))
               time.sleep(2 ** attempt)
+          if failures:
+              raise RuntimeError('SMOKE_DEPENDENCIES_FAILED: ' + ','.join(failures))
           print('PRODUCTION_SMOKE_SUCCESS; NO_EMAIL_SEND_CALLED', flush=True)
           PY
 
