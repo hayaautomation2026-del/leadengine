@@ -23,6 +23,71 @@ class SDRWorkerTests(unittest.TestCase):
         sdr_worker.DRY_RUN = self.original_dry_run
         sdr_worker.HANDOFF_EMAIL = self.original_handoff_email
 
+
+    def test_validation_blocks_placeholders_and_short_messages(self):
+        invalid = [
+            ("owner@example.com", "Hey", "This is a sufficiently long valid body for testing."),
+            ("owner@example.com", "Good subject", "short"),
+            ("owner@example.com", "Hi [Name]", "This is a sufficiently long valid body for testing."),
+            ("owner@example.com", "Good subject", "```json\\nThis is a long body with unrendered text."),
+            ("missing-at.example.com", "Good subject", "This is a sufficiently long valid body for testing."),
+        ]
+        for email, subject, body in invalid:
+            with self.subTest(subject=subject, body=body):
+                with self.assertRaises(ValueError):
+                    sdr_worker.validate_outbound_email(email, subject, body)
+
+    def test_invalid_send_never_calls_gmail(self):
+        sdr_worker.gmail_api = lambda *a, **k: self.fail("Gmail must not run")
+        with self.assertRaises(ValueError):
+            sdr_worker.send_email("token", "owner@example.com", "Bad", "Too short")
+
+    def test_outbox_claim_precedes_send_and_persistence_retries(self):
+        calls = []
+        failures = [1]
+        original_sleep = sdr_worker.time.sleep
+        sdr_worker.time.sleep = lambda _: None
+        def fake_sb(method, path, *, params=None, body=None, prefer=None):
+            calls.append((method, path, body, params))
+            if method == "PATCH" and path == "leads" and body.get("outreach_status") == "sending":
+                return [{"id": "lead-1"}]
+            if method == "POST" and path == "sdr_email_messages":
+                return [{"id": "outbox-1"}]
+            if method == "PATCH" and path == "sdr_email_messages":
+                if failures:
+                    failures.pop()
+                    raise RuntimeError("temporary database outage")
+                return [{"id": "outbox-1"}]
+            if method == "PATCH" and path == "leads":
+                return [{"id": "lead-1"}]
+            return []
+        try:
+            sdr_worker.sb = fake_sb
+            lead = {"id": "lead-1", "outreach_status": "pending"}
+            outbox = sdr_worker.reserve_outbound(lead, "owner@example.com", "Question", "This body is over 25 characters.")
+            self.assertEqual(outbox, "outbox-1")
+            self.assertEqual([(x[0], x[1]) for x in calls[:2]],
+                             [("PATCH", "leads"), ("POST", "sdr_email_messages")])
+            sdr_worker.finalize_outbound("lead-1", outbox, {"id": "gmail-1", "threadId": "thread-1"}, {
+                "outreach_status": "contacted", "last_contacted_at": sdr_worker.now(),
+                "followup_due_at": None,
+            })
+            self.assertEqual(len([x for x in calls if x[0] == "PATCH" and x[1] == "sdr_email_messages"]), 2)
+            self.assertEqual(calls[-1][2]["outreach_status"], "contacted")
+        finally:
+            sdr_worker.time.sleep = original_sleep
+
+    def test_failed_outbox_record_never_calls_gmail(self):
+        sdr_worker.sb = lambda method, path, **kwargs: (
+            [{"id": "lead-1"}] if method == "PATCH" and path == "leads" else []
+        )
+        sdr_worker.gmail_api = lambda *a, **k: self.fail("Gmail must never run")
+        with self.assertRaises(RuntimeError):
+            sdr_worker.reserve_outbound(
+                {"id": "lead-1", "outreach_status": "pending"},
+                "owner@example.com", "Question", "This body is over 25 characters."
+            )
+
     def test_due_lead_generates_dry_followup_without_sending(self):
         sdr_worker.DRY_RUN = True
 

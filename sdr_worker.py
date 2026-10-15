@@ -15,6 +15,7 @@ import base64
 import json
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from email.utils import formataddr
@@ -227,7 +228,88 @@ called by main(): Phase 2 requires persistent state, threaded sends and gates.
     return advance(state, message_id, body, assessment, approved_offer, paused=paused)
 
 
+
+INVALID_OUTBOUND_TOKENS = ("[Name]", "{{", "}}", "None", "undefined", "```json")
+
+
+def validate_outbound_email(to_email, subject, body):
+    """Validate every outbound message before Gmail is called."""
+    email = to_email.strip() if isinstance(to_email, str) else ""
+    if not email or "@" not in email or "." not in email:
+        raise ValueError("missing or invalid recipient email")
+    if not isinstance(subject, str) or len(subject.strip()) < 4:
+        raise ValueError("subject must have at least 4 characters")
+    if not isinstance(body, str) or len(body.strip()) < 25:
+        raise ValueError("body must have at least 25 characters")
+    for token in INVALID_OUTBOUND_TOKENS:
+        if token in subject or token in body:
+            raise ValueError(f"unresolved placeholder {token!r}")
+    return email, subject.strip(), body.strip()
+
+
+def reserve_outbound(lead, email, subject, body):
+    """Atomically claim the lead, then durably queue the intended send."""
+    lead_id = lead["id"]
+    original_status = lead["outreach_status"]
+    claimed = sb("PATCH", "leads", params={
+        "id": f"eq.{lead_id}", "outreach_status": f"eq.{original_status}", "select": "id",
+    }, body={"outreach_status": "sending"}, prefer="return=representation")
+    if not claimed:
+        raise RuntimeError(f"Pre-send claim failed for lead {lead_id}; Gmail not called")
+
+    # Existing sdr_email_messages CHECK permits 'queued', not 'pending'.
+    queued = sb("POST", "sdr_email_messages", body={
+        "lead_id": lead_id, "direction": "outbound",
+        "from_email": GMAIL_FROM_EMAIL, "to_email": email,
+        "subject": subject, "body_text": body, "status": "queued",
+    }, prefer="return=representation")
+    if not queued or not queued[0].get("id"):
+        raise RuntimeError(f"Pre-send outbox record failed for lead {lead_id}; Gmail not called")
+    return queued[0]["id"]
+
+
+def finalize_outbound(lead_id, outbox_id, gmail_result, lead_fields):
+    """Retry post-send persistence; retain the queued record and lock on failure."""
+    gmail_id = gmail_result.get("id") if isinstance(gmail_result, dict) else None
+    if not gmail_id:
+        raise RuntimeError(f"Gmail returned no message ID for queued email {outbox_id}; review required")
+
+    sent_time = lead_fields["last_contacted_at"]
+    for attempt in range(4):  # initial attempt, then three retries
+        try:
+            recorded = sb("PATCH", "sdr_email_messages", params={
+                "id": f"eq.{outbox_id}", "select": "id",
+            }, body={
+                "gmail_message_id": gmail_id,
+                "gmail_thread_id": gmail_result.get("threadId"),
+                "status": "sent", "sent_at": sent_time,
+            }, prefer="return=representation")
+            if not recorded:
+                raise RuntimeError(f"Outbox row {outbox_id} not found")
+
+            updated = sb("PATCH", "leads", params={
+                "id": f"eq.{lead_id}", "outreach_status": "eq.sending", "select": "id",
+            }, body=lead_fields, prefer="return=representation")
+            if not updated:
+                raise RuntimeError(f"Lead {lead_id} no longer sending; review its status")
+            return
+        except Exception as exc:
+            print(f"POST-SEND PERSISTENCE FAILED: lead={lead_id} outbox={outbox_id} "
+                  f"gmail_message_id={gmail_id} attempt={attempt + 1}/4: {exc}")
+            if attempt == 3:
+                raise RuntimeError(
+                    f"Sent Gmail message {gmail_id} requires reconciliation; "
+                    f"outbox {outbox_id} remains recorded and lead is not eligible for resend"
+                ) from exc
+            time.sleep(2 ** attempt)
+
+
 def send_email(token, to_email, subject, body):
+    try:
+        to_email, subject, body = validate_outbound_email(to_email, subject, body)
+    except ValueError as exc:
+        print(f"OUTBOUND VALIDATION FAILED for {to_email!r}: {exc}")
+        raise
     msg = MIMEText(body, "plain", "utf-8")
     msg["To"] = to_email
     msg["Subject"] = subject
@@ -449,15 +531,21 @@ def process_followups(token):
             prepared += 1
             continue
 
-        result = send_email(token, email, subject, body)
-        sent_time = now()
-        sb("POST", "sdr_email_messages", body={
-            "lead_id": lead["id"], "direction": "outbound",
-            "gmail_message_id": result.get("id"), "gmail_thread_id": result.get("threadId"),
-            "from_email": GMAIL_FROM_EMAIL, "to_email": email,
-            "subject": subject, "body_text": body, "status": "sent", "sent_at": sent_time,
-        }, prefer="return=minimal")
+        try:
+            email, subject, body = validate_outbound_email(email, subject, body)
+        except ValueError as exc:
+            print(f"FOLLOW-UP VALIDATION FAILED for lead {lead['id']}: {exc}; review required")
+            continue
 
+        # The claimed lead is excluded from the next due-followup query.
+        outbox_id = reserve_outbound(lead, email, subject, body)
+        try:
+            result = send_email(token, email, subject, body)
+        except Exception as exc:
+            print(f"GMAIL SEND FAILED/UNCERTAIN: lead={lead['id']} outbox={outbox_id}: {exc}; review required")
+            raise
+
+        sent_time = now()
         total_touches = len(history) + 1
         if total_touches >= MAX_TOUCHES:
             next_status = "stopped"
@@ -466,7 +554,7 @@ def process_followups(token):
             next_status = "contacted"
             next_due = after_days(FOLLOWUP_DELAYS_DAYS[total_touches - 1])
 
-        sb("PATCH", "leads", params={"id": f"eq.{lead['id']}"}, body={
+        finalize_outbound(lead["id"], outbox_id, result, {
             "outreach_status": next_status,
             "last_contacted_at": sent_time,
             "last_checked_at": sent_time,
@@ -517,14 +605,21 @@ def send_batch(token):
             prepared += 1
             continue
 
-        result = send_email(token, email, subject, body)
+        try:
+            email, subject, body = validate_outbound_email(email, subject, body)
+        except ValueError as exc:
+            print(f"OUTREACH VALIDATION FAILED for lead {lead['id']}: {exc}; review required")
+            continue
+
+        outbox_id = reserve_outbound(lead, email, subject, body)
+        try:
+            result = send_email(token, email, subject, body)
+        except Exception as exc:
+            print(f"GMAIL SEND FAILED/UNCERTAIN: lead={lead['id']} outbox={outbox_id}: {exc}; review required")
+            raise
+
         sent_time = now()
-        sb("POST", "sdr_email_messages", body={
-            "lead_id": lead["id"], "direction": "outbound", "gmail_message_id": result.get("id"),
-            "gmail_thread_id": result.get("threadId"), "from_email": GMAIL_FROM_EMAIL,
-            "to_email": email, "subject": subject, "body_text": body, "status": "sent", "sent_at": sent_time,
-        }, prefer="return=minimal")
-        sb("PATCH", "leads", params={"id": f"eq.{lead['id']}"}, body={
+        finalize_outbound(lead["id"], outbox_id, result, {
             "outreach_status": "contacted",
             "first_contact_at": sent_time,
             "last_contacted_at": sent_time,
