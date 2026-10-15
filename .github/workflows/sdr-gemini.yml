@@ -1,9 +1,16 @@
 name: LeadEngine SDR - Gemini
 
 on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/sdr-gemini.yml']
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
 
 concurrency:
   group: leadengine-sdr-gemini
@@ -14,8 +21,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Publish smoke run link
+        if: github.event_name != 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          curl --silent --show-error --fail --output /dev/null \
+            -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/$GH_REPOSITORY/statuses/$GH_SHA" \
+            -d "{\"state\":\"pending\",\"context\":\"production-smoke/sdr-gemini\",\"description\":\"Read-only production connectivity probe running\",\"target_url\":\"https://github.com/$GH_REPOSITORY/actions/runs/$GH_RUN_ID\"}"
+
       - name: Check required secrets
-        id: preflight
         env:
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -27,28 +47,78 @@ jobs:
           for v in SUPABASE_KEY GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REFRESH_TOKEN GEMINI_API_KEY; do
             if [ -z "${!v}" ]; then echo "Missing $v"; missing=1; fi
           done
-          if [ "$missing" -eq 1 ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
+          if [ "$missing" -eq 1 ]; then exit 1; fi
 
       - name: Checkout
-        if: steps.preflight.outputs.ready == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
-        if: steps.preflight.outputs.ready == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install SDR dependencies
-        if: steps.preflight.outputs.ready == 'true'
         run: python -m pip install --upgrade pip requests supabase==2.3.4
 
+      - name: Live read-only connectivity smoke (no email sends)
+        if: github.event_name != 'schedule'
+        env:
+          SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: gemini-3.8-flash
+          GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
+          SDR_DRY_RUN: 'true'
+        run: |
+          python - <<'PY'
+          import os
+          import time
+          import requests
+          import sdr_worker as worker
+
+          settings_rows = worker.sb('GET', 'sdr_settings', params={
+              'select': 'sending_enabled,kill_switch',
+              'id': 'eq.true',
+              'limit': '1',
+          }) or []
+          assert settings_rows, 'SAFETY_GATE_FAIL no settings row'
+          settings = settings_rows[0]
+          assert settings.get('sending_enabled') is False or settings.get('kill_switch') is True, 'SAFETY_GATE_FAIL sending not disabled'
+          print('SUPABASE_REST_OK; SENDING_DISABLED_VERIFIED', flush=True)
+
+          token = worker.gmail_token()
+          profile = worker.gmail_api(token, 'GET', 'profile')
+          assert profile.get('emailAddress'), 'GMAIL_PROFILE_MISSING'
+          inbox = worker.gmail_api(token, 'GET', 'messages', params={'maxResults': 1})
+          assert isinstance(inbox, dict), 'GMAIL_INBOX_READ_INVALID'
+          print('GOOGLE_OAUTH_REFRESH_OK; GMAIL_INBOX_READ_OK', flush=True)
+
+          model = os.environ['GEMINI_MODEL']
+          url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent'
+          payload = {
+              'contents': [{'parts': [{'text': 'Return a short greeting using one word.'}]}]
+          }
+          for attempt in range(3):
+              response = requests.post(url, params={'key': os.environ['GEMINI_API_KEY']},
+                                       headers={'Content-Type':'application/json'}, json=payload, timeout=60)
+              if response.status_code == 200:
+                  candidates = response.json().get('candidates') or []
+                  parts = candidates[0].get('content', {}).get('parts', []) if candidates else []
+                  assert any(str(p.get('text') or '').strip() for p in parts), 'GEMINI_EMPTY_GENERATION'
+                  print('GEMINI_GENERATION_HTTP_200_OK model=' + model, flush=True)
+                  break
+              print('GEMINI_GENERATION_HTTP_' + str(response.status_code), flush=True)
+              if response.status_code not in (429, 500, 502, 503, 504) or attempt == 2:
+                  raise RuntimeError('GEMINI_CONFIGURED_MODEL_FAILED HTTP ' + str(response.status_code))
+              time.sleep(2 ** attempt)
+          print('PRODUCTION_SMOKE_SUCCESS; NO_EMAIL_SEND_CALLED', flush=True)
+          PY
+
       - name: Run SDR worker (Supabase gated)
-        if: steps.preflight.outputs.ready == 'true'
+        if: github.event_name == 'schedule'
         env:
           SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -59,6 +129,28 @@ jobs:
           GEMINI_MODEL: gemini-3.8-flash
           GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
           SDR_FROM_NAME: ${{ secrets.SDR_FROM_NAME || 'Ameer' }}
-          SDR_DRY_RUN: 'false'
+          SDR_DRY_RUN: 'true'
           INBOX_GEMINI_MODEL: gemini-flash-latest
         run: python sdr_worker_gemini.py
+
+      - name: Publish smoke conclusion
+        if: always() && github.event_name != 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_REPOSITORY: ${{ github.repository }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" = "success" ]; then
+            result=success
+            description="Live read-only smoke completed successfully"
+          else
+            result=failure
+            description="Live read-only smoke failed; review job logs"
+          fi
+          curl --silent --show-error --fail --output /dev/null \
+            -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/$GH_REPOSITORY/statuses/$GH_SHA" \
+            -d "{\"state\":\"$result\",\"context\":\"production-smoke/sdr-gemini\",\"description\":\"$description\",\"target_url\":\"https://github.com/$GH_REPOSITORY/actions/runs/$GH_RUN_ID\"}"
