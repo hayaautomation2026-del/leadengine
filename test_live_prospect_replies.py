@@ -12,7 +12,7 @@ from conversation_engine import new_conversation
 
 class LiveReplyTests(unittest.TestCase):
     def run_reply(self, message, assessment, *, existing=None, dry=False,
-                  classification="warm", capture_handoff=False):
+                  classification="warm", legacy=False):
         lead = {
             "id": "lead-1", "email": "prospect@example.com",
             "business_name": "Prospect Company", "outreach_status": "contacted",
@@ -20,6 +20,9 @@ class LiveReplyTests(unittest.TestCase):
         }
         if existing:
             lead.update(existing)
+        if legacy:
+            lead.pop("conversation_state")
+            lead.pop("human_owned")
         events = []
         reply = base64.urlsafe_b64encode(message.encode()).decode().rstrip("=")
 
@@ -133,11 +136,10 @@ class LiveReplyTests(unittest.TestCase):
     def test_legacy_lead_missing_state_cannot_auto_send(self):
         q = "What does it cost?"
         events, alerts = self.run_reply(q, self.evidence(q, "price", ["pricing"]),
-                                        existing={"conversation_state": None})
-        # Missing column is different from a NULL value in an existing column.
-        # Simulate it by selecting a legacy row directly:
-        self.assertEqual(alerts, 0)
-        self.assertTrue(self.outbound_events(events))
+                                        legacy=True)
+        self.assertEqual(alerts, 1)
+        self.assertFalse(self.outbound_events(events))
+        self.assertTrue(any(p.get("outreach_status") == "handoff" for p in self.patches(events)))
 
     def test_stop_phrase_wins_over_model_label(self):
         q = "Please stop contacting me"

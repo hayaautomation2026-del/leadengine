@@ -77,13 +77,22 @@ def lead_pain_signals(lead):
         ("unanswered_reviews", "Unanswered reviews observed"),
     )
     reason = str(lead.get("pain_reason") or "").strip()
-    if reason:
+    verified_topics = ("chatbot", "whatsapp", "inquiry form",
+                       "after-hours", "after hours", "unanswered review")
+    if any(topic in reason.lower() for topic in verified_topics):
         signals.append("Recorded pain reason: " + reason[:300])
     for field, observation in mapping:
         val = lead.get(field)
-        if (val is False and field != "unanswered_reviews") or (
-            val is True and field == "unanswered_reviews"
-        ):
+        keyword = {
+            "has_website_chatbot": "chatbot",
+            "has_whatsapp_button": "whatsapp",
+            "has_inquiry_form": "inquiry form",
+            "has_afterhours_contact": "after",
+            "unanswered_reviews": "unanswered review",
+        }[field]
+        if val is True and field == "unanswered_reviews":
+            signals.append(observation)
+        elif val is False and field != "unanswered_reviews" and keyword in reason.lower():
             signals.append(observation)
     return signals
 
@@ -658,13 +667,29 @@ def handle_prospect_reply(token, lead, sender_email, subject, body, msg_id, thre
         print(f"DRY PROSPECT REPLY | {sender_email} | {reply_subject}\n{reply_body}\n---")
         return "draft"
 
+    def blocked_draft_handoff(reason):
+        """Persist takeover when a draft cannot be safely sent."""
+        human_state = set_owner(next_state, "human")
+        body = {"outreach_status": "handoff", "followup_due_at": None,
+                "last_checked_at": now(), "human_owned": True,
+                "conversation_state": human_state}
+        sb("PATCH", "leads", params={"id": f"eq.{lead['id']}"}, body=body)
+        try:
+            notify_hot_handoff(token, lead, subject, body_text, {
+                "summary": reason, "buying_intent": cls.get("buying_intent")
+            })
+        except Exception as exc:
+            print(f"PROSPECT HANDOFF ALERT FAILED: {exc}")
+        return "handoff"
+
+    body_text = body
     settings = load_settings()
     if not settings.get("sending_enabled") or settings.get("kill_switch"):
         print(f"PROSPECT REPLY PAUSED BY OWNER for {sender_email}")
         return "wait"
     if not supported or lead.get("outreach_status") != "contacted" or lead.get("human_owned"):
         print(f"PROSPECT REPLY requires manual review: {sender_email}")
-        return "handoff"
+        return blocked_draft_handoff("Lead ownership or status requires manual review")
     remaining, _ = daily_remaining(settings)
     if remaining < 1:
         print(f"PROSPECT REPLY daily cap reached: {sender_email}")
@@ -677,7 +702,7 @@ def handle_prospect_reply(token, lead, sender_email, subject, body, msg_id, thre
             raise ValueError("missing Gmail threading information")
     except ValueError as exc:
         print(f"PROSPECT REPLY blocked pending human review: {exc}")
-        return "handoff"
+        return blocked_draft_handoff(str(exc))
 
     # Owner and lock checked again immediately before claiming the send.
     current = sb("GET", "leads", params={
@@ -685,7 +710,7 @@ def handle_prospect_reply(token, lead, sender_email, subject, body, msg_id, thre
     }) or []
     if not current or current[0].get("human_owned") or current[0].get("outreach_status") != "contacted":
         print(f"PROSPECT REPLY not sent: takeover or lead status changed for {sender_email}")
-        return "handoff"
+        return blocked_draft_handoff("Owner takeover or outreach status changed")
     outbox_id = reserve_outbound(lead, sender_email, reply_subject, reply_body, require_sdr=True)
     try:
         sent = send_email(token, sender_email, reply_subject, reply_body,
