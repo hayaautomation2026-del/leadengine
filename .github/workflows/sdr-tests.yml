@@ -2,10 +2,13 @@ name: LeadEngine SDR tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, task3-le05-le06]
     paths:
       - 'sdr_worker.py'
       - 'sdr_worker_gemini.py'
+      - 'playbook.md'
+      - 'schema.sql'
+      - 'test_live_prospect_replies.py'
       - 'inbox_conversation.py'
       - 'unattended_inbox.py'
       - 'test_unattended_inbox.py'
@@ -32,6 +35,13 @@ jobs:
           python-version: '3.12'
       - name: Install test dependency
         run: python -m pip install requests
+      - name: Full Python unittest suite (isolated adapters)
+        run: |
+          set -e
+          for test_file in test_*.py; do
+            echo "Running $test_file"
+            python -m unittest -v "$test_file"
+          done
       - name: Test follow-up and handoff engine
         run: python -m unittest -v test_followup_engine.py
       - name: Test owner control gate

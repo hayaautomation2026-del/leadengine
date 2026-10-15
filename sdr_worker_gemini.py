@@ -15,6 +15,7 @@ import time
 import requests
 
 import sdr_worker
+import conversation_engine
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
@@ -65,6 +66,23 @@ def gemini_text(prompt: str) -> str:
     raise RuntimeError(last_error or "Gemini request failed")
 
 
+def load_playbook():
+    """Owner-editable Markdown, read afresh for each generation."""
+    return sdr_worker.load_playbook()
+
+
+def assess(message, history, reader=None, offer=None):
+    """Read prospect intent with Gemini; return structured evidence only."""
+    return conversation_engine.assess(message, history, gemini_text, offer)
+
+
+def advance(state, message_id, message, assessment, offer, *, paused=False):
+    """Use the same deterministic decisions as the controlled inbox test."""
+    return conversation_engine.advance(
+        state, message_id, message, assessment, offer, paused=paused
+    )
+
+
 ORIGINAL_SB = sdr_worker.sb
 ORIGINAL_FOLLOWUPS = sdr_worker.process_followups
 
@@ -113,6 +131,8 @@ def controlled_followups(token):
 
 
 sdr_worker.openai_text = gemini_text
+sdr_worker.assess = assess
+sdr_worker.advance = advance
 sdr_worker.sb = controlled_sb
 sdr_worker.process_followups = controlled_followups
 
