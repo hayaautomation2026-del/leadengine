@@ -243,7 +243,11 @@ Rules: Fewer than 90 words. Refer specifically to one recorded pain signal only.
     if result.get("decision") != "send":
         return None
     subject, body = str(result.get("subject", "")).strip(), str(result.get("body", "")).strip()
-    validate_outbound_email(lead.get("email"), subject, body, first_touch=True)
+    try:
+        validate_outbound_email(lead.get("email"), subject, body, first_touch=True)
+    except ValueError as exc:
+        print(f"AI OUTREACH DRAFT REJECTED for {lead.get('business_name')}: {exc}")
+        return None
     return subject, body
 
 

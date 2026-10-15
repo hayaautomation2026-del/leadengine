@@ -105,6 +105,16 @@ class LiveReplyTests(unittest.TestCase):
                             and e[3]["threadId"] == "thread_1" for e in events))
         self.assertEqual(alerts, 0)
 
+    def test_other_approved_questions_use_playbook_exactly(self):
+        for question, key, text in (
+            ("When can you begin setup?", "setup_timeline", "start date and delivery timetable"),
+            ("How does the process work?", "how_it_works", "confirm your needs and scope"),
+        ):
+            with self.subTest(key=key):
+                events, _ = self.run_reply(question, self.evidence(question, "details", [key]))
+                self.assertEqual(len(self.outbound_events(events)), 1)
+                self.assertIn(text, self.outbound_events(events)[0][3]["body_text"])
+
     def test_defer_wait_persists_without_sending_and_clears_followup(self):
         q = "Contact me next month"
         events, alerts = self.run_reply(q, self.evidence(q, "later"))
