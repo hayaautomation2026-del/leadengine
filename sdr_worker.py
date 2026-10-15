@@ -19,10 +19,11 @@ import time
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from email.utils import formataddr
+from pathlib import Path
 
 import requests
 
-from conversation_engine import advance, assess
+from conversation_engine import advance, assess, new_conversation, set_owner
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
@@ -35,6 +36,57 @@ FROM_NAME = os.environ.get("SDR_FROM_NAME", "Ameer")
 GMAIL_FROM_EMAIL = os.environ.get("GMAIL_FROM_EMAIL", "")
 HANDOFF_EMAIL = os.environ.get("SDR_HANDOFF_EMAIL", GMAIL_FROM_EMAIL)
 DRY_RUN = os.environ.get("SDR_DRY_RUN", "true").lower() == "true"
+
+PLAYBOOK_PATH = Path(__file__).with_name("playbook.md")
+
+
+def load_playbook():
+    """Read owner-approved Markdown on every generation; absent file fails closed."""
+    try:
+        return PLAYBOOK_PATH.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ""
+
+
+def playbook_offer():
+    """Only the exact Approved Buyer Q&A keys are eligible for an AI reply."""
+    text = load_playbook()
+    section = text.split("## Approved Buyer Q&A", 1)
+    catalog = {}
+    if len(section) == 2:
+        for line in section[1].split("\n## ", 1)[0].splitlines():
+            match = re.fullmatch(r"\s*-\s*([a-z][a-z0-9_]*)\s*:\s*(.+?)\s*", line)
+            if match:
+                catalog[match.group(1)] = match.group(2)
+    return {
+        "approved_answers": catalog,
+        "price_text": catalog.get("pricing", ""),
+        "details_text": catalog.get("how_it_works", ""),
+        "identity_text": catalog.get("identity", ""),
+    }
+
+
+def lead_pain_signals(lead):
+    """Use measured lead fields, not invented website observations."""
+    signals = []
+    mapping = (
+        ("has_website_chatbot", "Website chatbot not detected"),
+        ("has_whatsapp_button", "WhatsApp button not detected"),
+        ("has_inquiry_form", "Inquiry form not detected"),
+        ("has_afterhours_contact", "After-hours contact option not detected"),
+        ("unanswered_reviews", "Unanswered reviews observed"),
+    )
+    reason = str(lead.get("pain_reason") or "").strip()
+    if reason:
+        signals.append("Recorded pain reason: " + reason[:300])
+    for field, observation in mapping:
+        val = lead.get(field)
+        if (val is False and field != "unanswered_reviews") or (
+            val is True and field == "unanswered_reviews"
+        ):
+            signals.append(observation)
+    return signals
+
 
 FOLLOWUP_DELAYS_DAYS = (3, 5)
 MAX_TOUCHES = 1 + len(FOLLOWUP_DELAYS_DAYS)
@@ -148,10 +200,20 @@ def extract_json(text):
 
 
 def qualify_and_write(lead):
+    signals = lead_pain_signals(lead)
+    if not signals:
+        return None
+    playbook = load_playbook()
     prompt = f"""You are the SDR for a small automation business. Create ONE concise cold email to a business owner.
 Do not invent facts. Use only the supplied lead facts. The goal is to start a conversation, not hard-sell.
 Return JSON only: {{\"decision\":\"send|skip\",\"subject\":\"...\",\"body\":\"...\"}}.
 Skip if the business lacks enough evidence for a relevant message.
+
+Owner sales playbook (follow its rules; never invent missing terms):
+{playbook}
+
+Verified lead signals:
+{chr(10).join(signals)}
 
 Lead facts:
 Business: {lead.get('business_name')}
@@ -164,18 +226,24 @@ WhatsApp: {lead.get('has_whatsapp_button')}
 Chatbot: {lead.get('has_website_chatbot')}
 Inquiry form: {lead.get('has_inquiry_form')}
 After-hours contact: {lead.get('has_afterhours_contact')}
+Unanswered reviews: {lead.get('unanswered_reviews')}
 Notes: {lead.get('notes')}
 
-Rules: 70-120 words max. Plain text. No fake compliment. No fabricated observation. No links. No attachments. One clear low-friction call to action."""
+Rules: Fewer than 90 words. Refer specifically to one recorded pain signal only. Plain text. No fake compliment or fabricated observation. No links or attachments. One clear low-friction question. Never use cold-email clichés."""
     result = extract_json(openai_text(prompt))
     if result.get("decision") != "send":
         return None
-    return str(result.get("subject", "")).strip(), str(result.get("body", "")).strip()
+    subject, body = str(result.get("subject", "")).strip(), str(result.get("body", "")).strip()
+    validate_outbound_email(lead.get("email"), subject, body, first_touch=True)
+    return subject, body
 
 
 def write_followup(lead, previous_subject, previous_body, followup_number):
+    playbook = load_playbook()
     prompt = f"""You are the SDR for a small automation business.
 Write follow-up #{followup_number} to a prospect who has not replied yet.
+Owner playbook (follow it; use only approved terms):
+{playbook}
 
 Return JSON only: {{\"body\":\"...\"}}.
 
@@ -229,14 +297,23 @@ called by main(): Phase 2 requires persistent state, threaded sends and gates.
 
 
 
-INVALID_OUTBOUND_TOKENS = ("[Name]", "{{", "}}", "None", "undefined", "```json")
+INVALID_OUTBOUND_TOKENS = ("[Name]", "{{", "}}", "None", "undefined", "\u0060\u0060\u0060json")
+OUTBOUND_CLICHES = (
+    "i hope this finds you well",
+    "i wanted to reach out",
+    "circling back",
+    "touching base",
+)
+AUTOMATED_LOCAL_PARTS = {"noreply", "no-reply", "donotreply", "mailer-daemon"}
 
 
-def validate_outbound_email(to_email, subject, body):
+def validate_outbound_email(to_email, subject, body, *, first_touch=False):
     """Validate every outbound message before Gmail is called."""
     email = to_email.strip() if isinstance(to_email, str) else ""
-    if not email or "@" not in email or "." not in email:
+    if not re.fullmatch(r"[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}", email):
         raise ValueError("missing or invalid recipient email")
+    if email.split("@", 1)[0].lower() in AUTOMATED_LOCAL_PARTS:
+        raise ValueError("automated/no-reply recipient is blocked")
     if not isinstance(subject, str) or len(subject.strip()) < 4:
         raise ValueError("subject must have at least 4 characters")
     if not isinstance(body, str) or len(body.strip()) < 25:
@@ -244,16 +321,24 @@ def validate_outbound_email(to_email, subject, body):
     for token in INVALID_OUTBOUND_TOKENS:
         if token in subject or token in body:
             raise ValueError(f"unresolved placeholder {token!r}")
+    normalized = " ".join((subject + " " + body).lower().split())
+    for phrase in OUTBOUND_CLICHES:
+        if phrase in normalized:
+            raise ValueError("generic cold-email cliché is blocked: " + phrase)
+    if first_touch and len(body.split()) >= 90:
+        raise ValueError("initial outreach must contain fewer than 90 words")
     return email, subject.strip(), body.strip()
 
 
-def reserve_outbound(lead, email, subject, body):
+def reserve_outbound(lead, email, subject, body, *, require_sdr=False):
     """Atomically claim the lead, then durably queue the intended send."""
     lead_id = lead["id"]
     original_status = lead["outreach_status"]
-    claimed = sb("PATCH", "leads", params={
-        "id": f"eq.{lead_id}", "outreach_status": f"eq.{original_status}", "select": "id",
-    }, body={"outreach_status": "sending"}, prefer="return=representation")
+    filters = {"id": f"eq.{lead_id}", "outreach_status": f"eq.{original_status}", "select": "id"}
+    if require_sdr:
+        filters["human_owned"] = "eq.false"
+    claimed = sb("PATCH", "leads", params=filters,
+                 body={"outreach_status": "sending"}, prefer="return=representation")
     if not claimed:
         raise RuntimeError(f"Pre-send claim failed for lead {lead_id}; Gmail not called")
 
@@ -304,7 +389,7 @@ def finalize_outbound(lead_id, outbox_id, gmail_result, lead_fields):
             time.sleep(2 ** attempt)
 
 
-def send_email(token, to_email, subject, body):
+def send_email(token, to_email, subject, body, *, thread_id=None, in_reply_to=None, references=None):
     try:
         to_email, subject, body = validate_outbound_email(to_email, subject, body)
     except ValueError as exc:
@@ -314,8 +399,20 @@ def send_email(token, to_email, subject, body):
     msg["To"] = to_email
     msg["Subject"] = subject
     msg["From"] = formataddr((FROM_NAME, GMAIL_FROM_EMAIL))
+    if thread_id is not None:
+        if (not re.fullmatch(r"[A-Za-z0-9_-]+", thread_id)
+                or not isinstance(in_reply_to, str)
+                or not re.fullmatch(r"<[^<>\s]+>", in_reply_to)):
+            raise ValueError("reply is missing safe Gmail threading metadata")
+        if references and ("\r" in references or "\n" in references):
+            raise ValueError("unsafe reply References header")
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = ((references or "") + " " + in_reply_to).strip()
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode().rstrip("=")
-    return gmail_api(token, "POST", "messages/send", body={"raw": raw})
+    payload = {"raw": raw}
+    if thread_id is not None:
+        payload["threadId"] = thread_id
+    return gmail_api(token, "POST", "messages/send", body=payload)
 
 
 def build_handoff_alert(lead, reply_subject, reply_body, cls):
@@ -381,7 +478,7 @@ BOUNCE_SUBJECT_MARKERS = (
     "mail delivery subsystem", "failure notice",
 )
 EMAIL_PATTERN = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
-LEAD_REPLY_FIELDS = "id,business_name,niche_id,email,phone_number,whatsapp_number,city,country,website_url"
+LEAD_REPLY_FIELDS = "*"  # tolerate legacy leads without new conversation fields
 
 
 def is_delivery_failure(sender_email, subject, headers):
@@ -459,6 +556,153 @@ def find_bounced_lead(payload, body, thread_id):
     return None
 
 
+
+def normalized_conversation(lead):
+    """Legacy/broken JSON state must never cause an auto-send or KeyError."""
+    saved = lead.get("conversation_state")
+    supported = "conversation_state" in lead and "human_owned" in lead
+    state = new_conversation()
+    if isinstance(saved, dict):
+        for key, default in new_conversation().items():
+            value = saved.get(key)
+            if isinstance(default, list) and isinstance(value, list):
+                state[key] = value
+            elif isinstance(default, dict) and isinstance(value, dict):
+                state[key] = value
+            elif isinstance(default, int) and isinstance(value, int) and value >= 0:
+                state[key] = value
+            elif isinstance(default, str) and isinstance(value, str):
+                state[key] = value
+            elif key == "defer_until" and (value is None or isinstance(value, str)):
+                state[key] = value
+    if lead.get("human_owned"):
+        state = set_owner(state, "human")
+    if state["owner"] not in ("sdr", "human") or state["status"] not in (
+        "active", "deferred", "handoff", "stopped"
+    ):
+        state = set_owner(new_conversation(), "human")
+    return state, supported
+
+
+def handle_prospect_reply(token, lead, sender_email, subject, body, msg_id, thread_id, headers):
+    """One inbound prospect turn: decision, durable record, then locked send."""
+    cls = classify_reply(lead, body)
+    classification = cls.get("classification", "unknown")
+    if classification not in ("hot", "warm", "cold", "unsubscribe", "bounce"):
+        classification = "unknown"
+    state, supported = normalized_conversation(lead)
+    offer = playbook_offer()
+
+    # Historical unsubscribe/bounce suppression is deliberately preserved.
+    if classification in ("unsubscribe", "bounce"):
+        action, next_state = "stop", state
+        next_state["status"] = "stopped"
+    else:
+        skip_reader = state["owner"] == "human" or state["status"] == "stopped"
+        assessment = {} if skip_reader else assess(body, state["history"], openai_text, offer)
+        next_state, decision = advance(state, msg_id, body, assessment, offer)
+        action = decision["action"]
+
+    # Missing columns or damaged historical states fail closed. No auto-reply.
+    if not supported and action == "draft":
+        action = "handoff"
+    if lead.get("outreach_status") in ("suppressed", "stopped", "sending"):
+        action = "stop" if lead.get("outreach_status") == "suppressed" else "handoff"
+
+    if action == "stop":
+        reason = classification if classification in ("unsubscribe", "bounce") else "unsubscribe"
+        sb("POST", "sdr_suppressions", body={"email": sender_email, "reason": reason},
+           prefer="resolution=ignore-duplicates")
+        next_state["status"] = "stopped"
+    if action == "handoff":
+        next_state = set_owner(next_state, "human")
+    if action == "wait" and next_state.get("status") != "deferred":
+        # An acknowledgement is a wait, not permission to send later.
+        next_state["defer_until"] = None
+
+    update = {"followup_due_at": None, "last_checked_at": now()}
+    if action == "stop":
+        update["outreach_status"] = "suppressed"
+    elif action == "handoff":
+        update["outreach_status"] = "hot" if classification == "hot" else "handoff"
+    elif action == "wait":
+        update["outreach_status"] = "deferred"
+    if supported and action != "draft":
+        update["conversation_state"] = next_state
+        update["human_owned"] = action == "handoff" or bool(lead.get("human_owned"))
+    sb("PATCH", "leads", params={"id": f"eq.{lead['id']}"}, body=update)
+
+    # Durable inbound Gmail ID prevents duplicate classification/send on next poll.
+    sb("POST", "sdr_email_messages", body={
+        "lead_id": lead["id"], "direction": "inbound",
+        "gmail_message_id": msg_id, "gmail_thread_id": thread_id,
+        "from_email": sender_email, "to_email": GMAIL_FROM_EMAIL,
+        "subject": subject, "body_text": body[:12000],
+        "status": "processed", "ai_classification": classification,
+        "ai_summary": str(cls.get("summary", ""))[:500],
+        "buying_intent": cls.get("buying_intent"),
+        "received_at": now(), "processed_at": now(),
+    }, prefer="return=minimal")
+
+    if action == "handoff" or (classification == "hot" and action != "stop"):
+        try:
+            notify_hot_handoff(token, lead, subject, body, cls)
+        except Exception as exc:
+            print(f"PROSPECT HANDOFF ALERT FAILED for {sender_email}: {exc}")
+
+    if action != "draft":
+        return action
+    reply_body = decision.get("body") or ""
+    reply_subject = subject if re.match(r"(?i)^re:", subject or "") else "Re: " + (subject or "Your enquiry")
+    if DRY_RUN:
+        print(f"DRY PROSPECT REPLY | {sender_email} | {reply_subject}\n{reply_body}\n---")
+        return "draft"
+
+    settings = load_settings()
+    if not settings.get("sending_enabled") or settings.get("kill_switch"):
+        print(f"PROSPECT REPLY PAUSED BY OWNER for {sender_email}")
+        return "wait"
+    if not supported or lead.get("outreach_status") != "contacted" or lead.get("human_owned"):
+        print(f"PROSPECT REPLY requires manual review: {sender_email}")
+        return "handoff"
+    remaining, _ = daily_remaining(settings)
+    if remaining < 1:
+        print(f"PROSPECT REPLY daily cap reached: {sender_email}")
+        return "wait"
+    parent_message_id = header_value(headers, "Message-ID")
+    reference_chain = header_value(headers, "References")
+    try:
+        validate_outbound_email(sender_email, reply_subject, reply_body)
+        if not thread_id or not re.fullmatch(r"<[^<>\s]+>", parent_message_id):
+            raise ValueError("missing Gmail threading information")
+    except ValueError as exc:
+        print(f"PROSPECT REPLY blocked pending human review: {exc}")
+        return "handoff"
+
+    # Owner and lock checked again immediately before claiming the send.
+    current = sb("GET", "leads", params={
+        "select": "id,human_owned,outreach_status", "id": f"eq.{lead['id']}", "limit": "1"
+    }) or []
+    if not current or current[0].get("human_owned") or current[0].get("outreach_status") != "contacted":
+        print(f"PROSPECT REPLY not sent: takeover or lead status changed for {sender_email}")
+        return "handoff"
+    outbox_id = reserve_outbound(lead, sender_email, reply_subject, reply_body, require_sdr=True)
+    try:
+        sent = send_email(token, sender_email, reply_subject, reply_body,
+                          thread_id=thread_id, in_reply_to=parent_message_id,
+                          references=reference_chain)
+    except Exception:
+        print(f"PROSPECT REPLY send uncertain: outbox={outbox_id}, lead={lead['id']}; manual reconciliation required")
+        raise
+    sent_at = now()
+    finalize_outbound(lead["id"], outbox_id, sent, {
+        "outreach_status": "contacted", "followup_due_at": None,
+        "last_contacted_at": sent_at, "last_checked_at": sent_at,
+        "conversation_state": next_state, "human_owned": False,
+    })
+    return "sent"
+
+
 def process_replies(token):
     processed = 0
     next_page = None
@@ -531,38 +775,7 @@ def process_replies(token):
             if not leads:
                 continue
             lead = leads[0]
-            cls = classify_reply(lead, body)
-            classification = cls.get("classification", "cold")
-            if classification in ("unsubscribe", "bounce"):
-                sb("POST", "sdr_suppressions", body={
-                    "email": sender_email, "reason": classification,
-                }, prefer="resolution=ignore-duplicates")
-            outreach_status = {
-                "hot": "hot", "warm": "warm", "cold": "stopped",
-                "unsubscribe": "suppressed", "bounce": "suppressed",
-            }.get(classification, "warm")
-            # Stop future follow-ups before acknowledging processing.
-            sb("PATCH", "leads", params={"id": f"eq.{lead['id']}"}, body={
-                "outreach_status": outreach_status,
-                "followup_due_at": None,
-                "last_checked_at": now(),
-            })
-            sb("POST", "sdr_email_messages", body={
-                "lead_id": lead["id"], "direction": "inbound",
-                "gmail_message_id": msg_id, "gmail_thread_id": thread_id,
-                "from_email": sender_email, "to_email": GMAIL_FROM_EMAIL,
-                "subject": subject, "body_text": body[:12000],
-                "status": "processed", "ai_classification": classification,
-                "ai_summary": str(cls.get("summary", ""))[:500],
-                "buying_intent": cls.get("buying_intent"),
-                "received_at": now(), "processed_at": now(),
-            }, prefer="return=minimal")
-
-            if classification == "hot":
-                try:
-                    notify_hot_handoff(token, lead, subject, body, cls)
-                except Exception as exc:
-                    print(f"HOT handoff alert failed for {sender_email}: {exc}")
+            handle_prospect_reply(token, lead, sender_email, subject, body, msg_id, thread_id, headers)
 
             # Gmail is marked read only after the inbound row was saved.
             gmail_api(token, "POST", f"messages/{msg_id}/modify",
@@ -709,7 +922,7 @@ def send_batch(token):
         return
 
     leads = sb("GET", "leads", params={
-        "select": "id,business_name,full_name,email,website_url,city,country,pain_score,pain_reason,has_whatsapp_button,has_website_chatbot,has_inquiry_form,has_afterhours_contact,notes,niche_id,niches(name)",
+        "select": "id,business_name,full_name,email,website_url,city,country,pain_score,pain_reason,has_whatsapp_button,has_website_chatbot,has_inquiry_form,has_afterhours_contact,unanswered_reviews,notes,niche_id,niches(name)",
         "email": "not.is.null", "outreach_status": "eq.pending", "order": "pain_score.desc,created_at.asc", "limit": str(min(remaining, 50))
     }) or []
 
@@ -740,7 +953,7 @@ def send_batch(token):
             continue
 
         try:
-            email, subject, body = validate_outbound_email(email, subject, body)
+            email, subject, body = validate_outbound_email(email, subject, body, first_touch=True)
         except ValueError as exc:
             print(f"OUTREACH VALIDATION FAILED for lead {lead['id']}: {exc}; review required")
             continue
