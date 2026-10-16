@@ -1,0 +1,25 @@
+name: LeadEngine - Multi-Client Reply Safety Tests
+on:
+  push:
+    branches: [main]
+    paths:
+      - sdr_worker.py
+      - test_multi_client_replies.py
+      - .github/workflows/multi-client-replies-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-multi-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests==2.31.0
+      - name: Test 50 customers, pagination, Spam, threading and failure isolation
+        run: python -m unittest -v test_multi_client_replies
