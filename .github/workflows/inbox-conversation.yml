@@ -37,6 +37,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: gemini-3-flash-preview
           GEMINI_FALLBACK_MODEL: gemini-3.6-flash
+          INBOX_GEMINI_RETRIES: '3'
           GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
           SDR_FROM_NAME: Ameer
         run: |
