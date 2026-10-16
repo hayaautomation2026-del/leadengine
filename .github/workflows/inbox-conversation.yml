@@ -24,18 +24,19 @@ jobs:
       - name: Verify live model generation with synthetic data
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-flash-latest
+          GEMINI_MODEL: gemini-3.8-flash
         run: python model_probe.py
       - name: Respond only inside the authorized test thread
         env:
-          INBOX_CHECK_ID: 07dfa044-4beb-48ec-82e9-b66dd8b7e909
+          INBOX_CHECK_ID: 61bfd601-e25c-4d91-878b-b1c1b1dcf7a7
           SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-flash-latest
+          GEMINI_MODEL: gemini-3.8-flash
+          GEMINI_FALLBACK_MODEL: gemini-3.6-flash
           GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
           SDR_FROM_NAME: Ameer
         run: |
