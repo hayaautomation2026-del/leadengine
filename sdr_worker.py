@@ -733,11 +733,17 @@ def handle_prospect_reply(token, lead, sender_email, subject, body, msg_id, thre
 
 
 def process_replies(token):
+    """Check one central Gmail account for replies from every known lead.
+
+    Read and Spam messages count; Gmail's unread/inbox labels are not processing
+    state. Match both sender AND a previously sent lead/thread before AI runs.
+    A failed message stays unprocessed so other clients are not blocked.
+    """
     processed = 0
     next_page = None
     while True:
         params = {
-            "q": "newer_than:7d -from:me in:inbox",
+            "q": "in:anywhere -in:trash newer_than:7d -from:me",
             "maxResults": 50,
         }
         if next_page:
@@ -754,62 +760,84 @@ def process_replies(token):
             if already_processed:
                 continue
 
-            msg = gmail_api(token, "GET", f"messages/{msg_id}", params={"format": "full"})
-            payload = msg.get("payload", {})
-            headers = payload.get("headers", [])
-            sender = header_value(headers, "From")
-            sender_match = EMAIL_PATTERN.search(sender)
-            sender_email = sender_match.group(0).lower() if sender_match else ""
-            body = extract_text(payload).strip()
-            subject = header_value(headers, "Subject")
-            thread_id = msg.get("threadId")
+            try:
+                msg = gmail_api(token, "GET", f"messages/{msg_id}", params={"format": "full"})
+                payload = msg.get("payload", {})
+                headers = payload.get("headers", [])
+                sender = header_value(headers, "From")
+                sender_match = EMAIL_PATTERN.search(sender)
+                sender_email = sender_match.group(0).lower() if sender_match else ""
+                body = extract_text(payload).strip()
+                subject = header_value(headers, "Subject")
+                thread_id = msg.get("threadId")
 
-            if is_delivery_failure(sender_email, subject, headers):
-                lead = find_bounced_lead(payload, body, thread_id)
-                if not lead or not lead.get("email"):
-                    print(f"Unmatched delivery failure {msg_id}; left unread for review")
+                if is_delivery_failure(sender_email, subject, headers):
+                    lead = find_bounced_lead(payload, body, thread_id)
+                    if not lead or not lead.get("email"):
+                        print(f"Unmatched delivery failure {msg_id}; left for review")
+                        continue
+                    failed_email = lead["email"].strip().lower()
+                    sb("POST", "sdr_suppressions", body={
+                        "email": failed_email, "reason": "bounce",
+                    }, prefer="resolution=ignore-duplicates")
+                    sb("PATCH", "leads", params={"id": f"eq.{lead['id']}"}, body={
+                        "outreach_status": "suppressed",
+                        "followup_due_at": None,
+                        "last_checked_at": now(),
+                    })
+                    sb("POST", "sdr_email_messages", body={
+                        "lead_id": lead["id"], "direction": "inbound",
+                        "gmail_message_id": msg_id, "gmail_thread_id": thread_id,
+                        "from_email": sender_email, "to_email": GMAIL_FROM_EMAIL,
+                        "subject": subject, "body_text": body[:12000],
+                        "status": "processed", "ai_classification": "bounce",
+                        "ai_summary": f"Delivery failure for {failed_email}",
+                        "received_at": now(), "processed_at": now(),
+                    }, prefer="return=minimal")
+                    gmail_api(token, "POST", f"messages/{msg_id}/modify",
+                              body={"removeLabelIds": ["UNREAD"]})
+                    processed += 1
                     continue
-                failed_email = lead["email"].strip().lower()
-                # Apply stop controls BEFORE recording the message. On partial
-                # Supabase failure, the next run can retry the entire bounce.
-                sb("POST", "sdr_suppressions", body={
-                    "email": failed_email, "reason": "bounce",
-                }, prefer="resolution=ignore-duplicates")
-                sb("PATCH", "leads", params={"id": f"eq.{lead['id']}"}, body={
-                    "outreach_status": "suppressed",
-                    "followup_due_at": None,
-                    "last_checked_at": now(),
-                })
-                sb("POST", "sdr_email_messages", body={
-                    "lead_id": lead["id"], "direction": "inbound",
-                    "gmail_message_id": msg_id, "gmail_thread_id": thread_id,
-                    "from_email": sender_email, "to_email": GMAIL_FROM_EMAIL,
-                    "subject": subject, "body_text": body[:12000],
-                    "status": "processed", "ai_classification": "bounce",
-                    "ai_summary": f"Delivery failure for {failed_email}",
-                    "received_at": now(), "processed_at": now(),
-                }, prefer="return=minimal")
+
+                if not sender_email or not thread_id:
+                    continue
+                recipients = " ".join(header_value(headers, name) for name in ("To", "Cc"))
+                if not any(match.group(0).lower() == GMAIL_FROM_EMAIL.lower()
+                           for match in EMAIL_PATTERN.finditer(recipients)):
+                    continue
+                leads = sb("GET", "leads", params={
+                    "select": LEAD_REPLY_FIELDS,
+                    "email": f"eq.{sender_email}",
+                    "limit": "1",
+                }) or []
+                if not leads:
+                    continue
+                lead = leads[0]
+
+                # Do not send to a known address in an unrelated email thread.
+                # An outbound record exists for every real LeadEngine send.
+                origin = sb("GET", "sdr_email_messages", params={
+                    "select": "id",
+                    "lead_id": f"eq.{lead['id']}",
+                    "direction": "eq.outbound",
+                    "status": "eq.sent",
+                    "gmail_thread_id": f"eq.{thread_id}",
+                    "limit": "1",
+                }) or []
+                if not origin:
+                    print(f"UNMATCHED_PROSPECT_THREAD message={msg_id}; no automated reply")
+                    continue
+                handle_prospect_reply(token, lead, sender_email, subject, body, msg_id, thread_id, headers)
+
+                # A failed handler must never be marked read or processed.
                 gmail_api(token, "POST", f"messages/{msg_id}/modify",
                           body={"removeLabelIds": ["UNREAD"]})
                 processed += 1
+            except Exception as exc:
+                # One bad model call or malformed email must not block 49 others.
+                # Never log the private body, email address, or credentials.
+                print(f"PROSPECT_REPLY_REVIEW message={msg_id} error_type={type(exc).__name__}")
                 continue
-
-            if not sender_email:
-                continue
-            leads = sb("GET", "leads", params={
-                "select": LEAD_REPLY_FIELDS,
-                "email": f"eq.{sender_email}",
-                "limit": "1",
-            }) or []
-            if not leads:
-                continue
-            lead = leads[0]
-            handle_prospect_reply(token, lead, sender_email, subject, body, msg_id, thread_id, headers)
-
-            # Gmail is marked read only after the inbound row was saved.
-            gmail_api(token, "POST", f"messages/{msg_id}/modify",
-                      body={"removeLabelIds": ["UNREAD"]})
-            processed += 1
         next_page = data.get("nextPageToken")
         if not next_page:
             break
