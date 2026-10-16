@@ -60,6 +60,9 @@ jobs:
       - name: Install SDR dependencies
         run: python -m pip install --upgrade pip requests supabase==2.3.4
 
+      - name: Test Gemini retry and fallback (offline)
+        run: python -m unittest discover -s tests -p 'test_gemini_resilience.py' -v
+
       - name: Live read-only connectivity smoke (no email sends)
         if: github.event_name != 'schedule'
         env:
@@ -70,14 +73,13 @@ jobs:
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: gemini-3.8-flash
+          GEMINI_FALLBACK_MODEL: gemini-3.6-flash
           GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
           SDR_DRY_RUN: 'true'
         run: |
           python - <<'PY'
-          import os
-          import time
-          import requests
           import sdr_worker as worker
+          from sdr_worker_gemini import gemini_text
 
           settings_rows = worker.sb('GET', 'sdr_settings', params={
               'select': 'sending_enabled,kill_switch',
@@ -101,24 +103,13 @@ jobs:
               print('GMAIL_OAUTH_OR_INBOX_FAILED: ' + str(exc), flush=True)
               failures.append('gmail')
 
-          model = os.environ['GEMINI_MODEL']
-          url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent'
-          payload = {
-              'contents': [{'parts': [{'text': 'Return a short greeting using one word.'}]}]
-          }
-          for attempt in range(3):
-              response = requests.post(url, params={'key': os.environ['GEMINI_API_KEY']},
-                                       headers={'Content-Type':'application/json'}, json=payload, timeout=60)
-              if response.status_code == 200:
-                  candidates = response.json().get('candidates') or []
-                  parts = candidates[0].get('content', {}).get('parts', []) if candidates else []
-                  assert any(str(p.get('text') or '').strip() for p in parts), 'GEMINI_EMPTY_GENERATION'
-                  print('GEMINI_GENERATION_HTTP_200_OK model=' + model, flush=True)
-                  break
-              print('GEMINI_GENERATION_HTTP_' + str(response.status_code), flush=True)
-              if response.status_code not in (429, 500, 502, 503, 504) or attempt == 2:
-                  raise RuntimeError('GEMINI_CONFIGURED_MODEL_FAILED HTTP ' + str(response.status_code))
-              time.sleep(2 ** attempt)
+          try:
+              answer = gemini_text('Return a short greeting using one word.')
+              assert answer.strip(), 'GEMINI_EMPTY_GENERATION'
+              print('GEMINI_SMOKE_OK', flush=True)
+          except Exception as exc:
+              print('GEMINI_SMOKE_FAILED: ' + str(exc), flush=True)
+              failures.append('gemini')
           if failures:
               raise RuntimeError('SMOKE_DEPENDENCIES_FAILED: ' + ','.join(failures))
           print('PRODUCTION_SMOKE_SUCCESS; NO_EMAIL_SEND_CALLED', flush=True)
@@ -134,6 +125,7 @@ jobs:
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: gemini-3.8-flash
+          GEMINI_FALLBACK_MODEL: gemini-3.6-flash
           GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
           SDR_FROM_NAME: ${{ secrets.SDR_FROM_NAME || 'Ameer' }}
           SDR_DRY_RUN: 'true'
