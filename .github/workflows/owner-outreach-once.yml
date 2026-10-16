@@ -1,0 +1,78 @@
+name: LeadEngine - One-Time Owner Outreach Test
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/owner-outreach-once.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: leadengine-owner-outreach-once
+  cancel-in-progress: false
+
+jobs:
+  owner-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
+      SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: gemini-3.8-flash
+      GEMINI_FALLBACK_MODEL: gemini-3.6-flash
+      GMAIL_FROM_EMAIL: aiagentsutomations01@gmail.com
+      SDR_DRY_RUN: 'true'
+      INBOX_CHECK_ID: 61bfd601-e25c-4d91-878b-b1c1b1dcf7a7
+    steps:
+      - name: Link GitHub run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl --silent --show-error --fail --output /dev/null \
+            -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "{\"state\":\"pending\",\"context\":\"owner-outreach-once\",\"description\":\"Owner-only one-time email test running\",\"target_url\":\"https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip requests supabase==2.3.4
+
+      - name: Verify one-email safety offline
+        run: python -m unittest discover -s tests -p 'test_owner_outreach.py' -v
+
+      - name: Generate and send owner-only test (once), then inspect Gmail thread
+        run: python owner_test_outreach.py
+
+      - name: Publish conclusion
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" = "success" ]; then
+            result=success
+            description="Owner-only test completed; see logs for Gmail acceptance"
+          else
+            result=failure
+            description="Owner-only test failed; do not manually resend without inspecting DB status"
+          fi
+          curl --silent --show-error --fail --output /dev/null \
+            -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "{\"state\":\"$result\",\"context\":\"owner-outreach-once\",\"description\":\"$description\",\"target_url\":\"https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
