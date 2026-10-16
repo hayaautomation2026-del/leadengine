@@ -72,33 +72,43 @@ def model_reader(prompt):
     base = "https://generativelanguage.googleapis.com/v1beta/models/"
     models = list(dict.fromkeys([model, fallback])) if fallback else [model]
     response = None
-    for index, candidate in enumerate(models):
-        if not re.fullmatch(r"gemini-[a-zA-Z0-9.\-]+", candidate):
-            raise ProviderConfigurationError("Invalid model configuration")
-        if index:
-            # Verify availability with the same account before attempting fallback.
+    success = False
+    # Default one pass preserves historical behavior and offline test expectations.
+    # Owner-only live workflow may set a bounded retry count after provider 503s.
+    retry_cycles = max(1, min(3, int(os.environ.get("INBOX_GEMINI_RETRIES", "1"))))
+    for cycle in range(retry_cycles):
+        for index, candidate in enumerate(models):
+            if not re.fullmatch(r"gemini-[a-zA-Z0-9.\-]+", candidate):
+                raise ProviderConfigurationError("Invalid model configuration")
+            if index:
+                # Verify fallback availability with the same account before use.
+                try:
+                    metadata = requests.get(base + candidate, headers=headers, timeout=10)
+                    if not metadata.ok or "generateContent" not in metadata.json().get("supportedGenerationMethods", []):
+                        raise TransientAIError("Backup model is unavailable")
+                except (requests.RequestException, ValueError):
+                    raise TransientAIError("Could not verify backup model") from None
             try:
-                metadata = requests.get(base + candidate, headers=headers, timeout=10)
-                if not metadata.ok or "generateContent" not in metadata.json().get("supportedGenerationMethods", []):
-                    raise TransientAIError("Backup model is unavailable")
-            except (requests.RequestException, ValueError):
-                raise TransientAIError("Could not verify backup model") from None
-        try:
-            response = requests.post(base + candidate + ":generateContent",
-                headers=headers, json={"contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}, timeout=20)
-        except (requests.Timeout, requests.ConnectionError):
-            print(f"TEST_AI_READ_FAILURE model={candidate} transport_error=true")
-            continue
-        PROVIDER_EVENTS.append({"model": candidate, "http_status": response.status_code})
-        if response.ok:
-            print(f"TEST_AI_MODEL_USED model={candidate} fallback={str(bool(index)).lower()}")
+                response = requests.post(base + candidate + ":generateContent",
+                    headers=headers, json={"contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"responseMimeType": "application/json", "temperature": 0}}, timeout=20)
+            except (requests.Timeout, requests.ConnectionError):
+                print(f"TEST_AI_READ_FAILURE model={candidate} transport_error=true cycle={cycle + 1}")
+                continue
+            PROVIDER_EVENTS.append({"model": candidate, "http_status": response.status_code})
+            if response.ok:
+                print(f"TEST_AI_MODEL_USED model={candidate} fallback={str(bool(index)).lower()} cycle={cycle + 1}")
+                success = True
+                break
+            print(f"TEST_AI_READ_FAILURE model={candidate} http_status={response.status_code} cycle={cycle + 1}")
+            if response.status_code == 429 or response.status_code >= 500:
+                continue
+            raise ProviderConfigurationError(f"AI HTTP {response.status_code}")
+        if success:
             break
-        print(f"TEST_AI_READ_FAILURE model={candidate} http_status={response.status_code}")
-        if response.status_code == 429 or response.status_code >= 500:
-            continue
-        raise ProviderConfigurationError(f"AI HTTP {response.status_code}")
-    else:
+        if cycle < retry_cycles - 1:
+            time.sleep(min(2 ** cycle, 4))
+    if not success:
         raise TransientAIError("AI temporarily unavailable")
     text = "".join(part.get("text", "") for candidate in response.json().get("candidates", [])
                    for part in candidate.get("content", {}).get("parts", []))
