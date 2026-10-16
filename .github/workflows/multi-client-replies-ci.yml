@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   offline-multi-client:
@@ -23,3 +24,22 @@ jobs:
       - run: python -m pip install requests==2.31.0
       - name: Test 50 customers, pagination, Spam, threading and failure isolation
         run: python -m unittest -v test_multi_client_replies
+      - name: Publish verified test result
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RESULT: ${{ job.status }}
+        run: |
+          if [ "$RESULT" = "success" ]; then
+            state=success
+            description="Multi-client reply offline tests passed"
+          else
+            state=failure
+            description="Multi-client reply offline tests failed"
+          fi
+          curl --silent --show-error --fail --output /dev/null \
+            -X POST -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "{\"state\":\"$state\",\"context\":\"multi-client-reply-safety\",\"description\":\"$description\",\"target_url\":\"https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
