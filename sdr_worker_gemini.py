@@ -18,52 +18,77 @@ import sdr_worker
 import conversation_engine
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash").strip()
+GEMINI_FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.6-flash").strip()
+RETRYABLE_GEMINI_HTTP = {429, 500, 502, 503, 504}
+GEMINI_ATTEMPTS_PER_MODEL = 3
 
 
 def gemini_text(prompt: str) -> str:
+    """Bounded exponential backoff, then switch models on transient failures.
+
+    Never fall back on authentication/configuration failures (4xx other than 429).
+    Return only completed text; caller never sends an unverified AI result.
+    """
     if not GEMINI_API_KEY:
         raise RuntimeError("Missing GEMINI_API_KEY")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    last_error = None
+    models = list(dict.fromkeys(m for m in (GEMINI_MODEL, GEMINI_FALLBACK_MODEL) if m))
+    if not models:
+        raise RuntimeError("Missing GEMINI_MODEL")
+    last_error = "Gemini temporarily unavailable"
 
-    for attempt in range(5):
-        try:
-            response = requests.post(
-                url,
-                params={"key": GEMINI_API_KEY},
-                headers={"Content-Type": "application/json"},
-                json={"contents": [{"parts": [{"text": prompt}]}]},
-                timeout=90,
-            )
-        except requests.RequestException as exc:
-            last_error = f"Gemini request error: {exc}"
-            if attempt == 4:
-                raise RuntimeError(last_error) from exc
-            time.sleep((2 ** attempt) + random.uniform(0, 1))
-            continue
+    for index, model in enumerate(models):
+        if index:
+            print(f"GEMINI_FALLBACK_ACTIVATED from={models[0]} to={model}", flush=True)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        for attempt in range(GEMINI_ATTEMPTS_PER_MODEL):
+            try:
+                response = requests.post(
+                    url,
+                    params={"key": GEMINI_API_KEY},
+                    headers={"Content-Type": "application/json"},
+                    json={"contents": [{"parts": [{"text": prompt}]}]},
+                    timeout=90,
+                )
+            except requests.RequestException as exc:
+                # Avoid logging tokens, prompts, or full transport exceptions.
+                last_error = f"Gemini transport failure on {model}: {type(exc).__name__}"
+                print(f"GEMINI_TRANSPORT_ERROR model={model} attempt={attempt + 1}", flush=True)
+            else:
+                if response.ok:
+                    try:
+                        data = response.json()
+                    except ValueError as exc:
+                        raise RuntimeError("Gemini returned invalid JSON") from exc
+                    parts = [
+                        part["text"]
+                        for candidate in data.get("candidates", [])
+                        for part in candidate.get("content", {}).get("parts", [])
+                        if part.get("text")
+                    ]
+                    text = "\n".join(parts).strip()
+                    if not text:
+                        raise RuntimeError("Gemini returned no text")
+                    print(
+                        f"GEMINI_GENERATION_HTTP_200_OK model={model} fallback={str(bool(index)).lower()}",
+                        flush=True,
+                    )
+                    return text
 
-        if response.ok:
-            data = response.json()
-            parts = []
-            for candidate in data.get("candidates", []):
-                content = candidate.get("content", {})
-                for part in content.get("parts", []):
-                    if part.get("text"):
-                        parts.append(part["text"])
-            text = "\n".join(parts).strip()
-            if not text:
-                raise RuntimeError("Gemini returned no text")
-            return text
+                status = response.status_code
+                last_error = f"Gemini model {model} failed HTTP {status}"
+                print(f"GEMINI_GENERATION_HTTP_{status} model={model} attempt={attempt + 1}", flush=True)
+                if status not in RETRYABLE_GEMINI_HTTP:
+                    # Bad API key, forbidden model, malformed request: fail closed.
+                    raise RuntimeError(last_error)
 
-        last_error = f"Gemini failed {response.status_code}: {response.text[:700]}"
-        if response.status_code not in {429, 500, 502, 503, 504} or attempt == 4:
-            raise RuntimeError(last_error)
+            if attempt < GEMINI_ATTEMPTS_PER_MODEL - 1:
+                delay = (2 ** attempt) + random.uniform(0, 1)
+                print(f"GEMINI_RETRY_BACKOFF model={model} seconds={delay:.2f}", flush=True)
+                time.sleep(delay)
 
-        time.sleep((2 ** attempt) + random.uniform(0, 1))
-
-    raise RuntimeError(last_error or "Gemini request failed")
+    raise RuntimeError(last_error)
 
 
 def load_playbook():
