@@ -26,33 +26,28 @@ def preflight():
         "select": "id,outreach_status,contact_status,last_checked_at,updated_at,notes,followup_due_at,last_contacted_at",
         "limit": "1000",
     }) or []
-    assert len(other) == 29 and all(r["outreach_status"] == "pending" for r in other), (
-        "ABORT: expected precisely 29 untouched pending leads"
-    )
-    assert not (sb("GET", "leads", params={"select": "id", "email": "eq." + TEST_EMAIL, "limit": "2"}) or []), (
-        "ABORT: owner test email already has a lead; never duplicate"
+    real = [r for r in other if r["outreach_status"] == "pending"]
+    assert len(real) == 29 and len(other) == 30, "ABORT: expected 29 pending leads and one stopped test lead"
+    tests = sb("GET", "leads", params={"select": "id,source,outreach_status,notes",
+             "email": "eq." + TEST_EMAIL, "limit": "2"}) or []
+    assert (len(tests) == 1 and tests[0]["source"] == "controlled_production_test"
+            and tests[0]["outreach_status"] == "stopped"
+            and MARKER in (tests[0].get("notes") or "")), "ABORT: test lead not isolated"
+    assert not (sb("GET", "sdr_email_messages", params={
+        "select": "id", "lead_id": "eq." + tests[0]["id"], "limit": "1"}) or []), (
+        "ABORT: test lead already has outbound history"
     )
     print("SAFE_PRECHECK_PASS existing_pending_leads=29 manual_mode=true sending_enabled=false", flush=True)
-    return {r["id"]: r for r in other}
+    return {r["id"]: r for r in real}, tests[0]["id"]
 
-def insert_test_lead():
-    rows = sb("POST", "leads", body={
-        "business_name": "Synthetic Owner-Only Outreach Test",
-        "full_name": "Test Owner",
-        "email": TEST_EMAIL,
-        "email_source": "owner_authorized_test",
-        "source": "controlled_production_test",
-        "city": "Austin",
-        "country": "USA",
-        "pain_score": 95,
-        "pain_reason": "Synthetic test fixture observation: inquiry form not detected; fictional business, no real site",
-        "has_inquiry_form": False,
-        "contact_status": "new",
-        "outreach_status": "approved",
-        "notes": MARKER + " | Fully fictional business; real owner email only",
-    }, prefer="return=representation") or []
-    assert len(rows) == 1 and rows[0].get("id"), "TEST_LEAD_INSERT_FAILED"
-    return rows[0]["id"]
+def activate_test_lead(existing_id):
+    rows = sb("PATCH", "leads", params={
+        "id": "eq." + existing_id,
+        "outreach_status": "eq.stopped",
+        "select": "id",
+    }, body={"outreach_status": "approved"}, prefer="return=representation") or []
+    assert len(rows) == 1 and rows[0].get("id") == existing_id, "TEST_LEAD_APPROVAL_FAILED"
+    return existing_id
 
 def safeguard_send(token, to_email, subject, body, **kwargs):
     global send_calls
@@ -88,10 +83,10 @@ def assert_old_unchanged(snapshot):
 
 def main():
     global lead_id, sending_armed, original_send, original_controlled_sb
-    snapshot = preflight()
+    snapshot, lead_id = preflight()
     try:
-        lead_id = insert_test_lead()
-        print("TEST_LEAD_CREATED lead_id=" + lead_id, flush=True)
+        activate_test_lead(lead_id)
+        print("TEST_LEAD_ACTIVATED lead_id=" + lead_id, flush=True)
         original_send = worker.send_email
         original_controlled_sb = worker.sb
         worker.send_email = safeguard_send
