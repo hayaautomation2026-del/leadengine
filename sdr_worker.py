@@ -979,7 +979,7 @@ def send_batch(token):
         return
 
     leads = sb("GET", "leads", params={
-        "select": "id,business_name,full_name,email,website_url,city,country,pain_score,pain_reason,has_whatsapp_button,has_website_chatbot,has_inquiry_form,has_afterhours_contact,unanswered_reviews,notes,niche_id,niches(name)",
+        "select": "id,outreach_status,business_name,full_name,email,website_url,city,country,pain_score,pain_reason,has_whatsapp_button,has_website_chatbot,has_inquiry_form,has_afterhours_contact,unanswered_reviews,notes,niche_id,niches(name)",
         "email": "not.is.null", "outreach_status": "eq.pending", "order": "pain_score.desc,created_at.asc", "limit": str(min(remaining, 50))
     }) or []
 
