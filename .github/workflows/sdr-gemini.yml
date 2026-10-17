@@ -115,6 +115,51 @@ jobs:
           print('PRODUCTION_SMOKE_SUCCESS; NO_EMAIL_SEND_CALLED', flush=True)
           PY
 
+      - name: Verify SDR message logging round-trip (synthetic, no send)
+        if: github.event_name != 'schedule'
+        env:
+          SUPABASE_URL: https://jequjltbvofmhfnbsfzt.supabase.co
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SDR_DRY_RUN: 'true'
+        run: |
+          python - <<'PY'
+          from uuid import uuid4
+          import sdr_worker as worker
+
+          settings = worker.load_settings()
+          assert settings.get('sending_enabled') is False, 'SAFETY_GATE_FAIL sending is enabled'
+          leads = worker.sb('GET', 'leads', params={'select': 'id', 'limit': '1'}) or []
+          assert leads, 'SDR_LOG_SMOKE_NO_LEAD_FOR_FK'
+          marker = 'LEADENGINE_SMOKE_' + uuid4().hex
+          test_id = None
+          try:
+              inserted = worker.sb('POST', 'sdr_email_messages', body={
+                  'lead_id': leads[0]['id'],
+                  'direction': 'inbound',
+                  'status': 'processed',
+                  'subject': marker,
+                  'body_text': 'Synthetic REST logging smoke, not a received email.',
+                  'ai_classification': 'unknown'
+              }, prefer='return=representation') or []
+              assert len(inserted) == 1, 'SDR_LOG_INSERT_NOT_CONFIRMED'
+              test_id = inserted[0]['id']
+              loaded = worker.sb('GET', 'sdr_email_messages', params={
+                  'select': 'id,subject,direction,status',
+                  'id': 'eq.' + test_id,
+                  'limit': '1'
+              }) or []
+              assert len(loaded) == 1 and loaded[0]['subject'] == marker, 'SDR_LOG_READBACK_FAILED'
+              print('SUPABASE_SDR_LOG_INSERT_READ_OK; NO_EMAIL_SENT', flush=True)
+          finally:
+              if test_id:
+                  worker.sb('DELETE', 'sdr_email_messages', params={'id': 'eq.' + test_id})
+                  remaining = worker.sb('GET', 'sdr_email_messages', params={
+                      'select': 'id', 'id': 'eq.' + test_id, 'limit': '1'
+                  }) or []
+                  assert not remaining, 'SDR_LOG_SMOKE_CLEANUP_FAILED'
+                  print('SUPABASE_SDR_LOG_CLEANUP_OK', flush=True)
+          PY
+
       - name: Run SDR worker (Supabase gated)
         if: github.event_name == 'schedule'
         env:
