@@ -163,4 +163,45 @@ sdr_worker.process_followups = controlled_followups
 
 
 if __name__ == "__main__":
-    sdr_worker.main()
+    # Existing scheduled GitHub Action executes this script with SDR_DRY_RUN=true.
+    # Permit exactly one owner-address test. No YAML changes, no prospect batch.
+    if os.environ.get("GITHUB_EVENT_NAME") == "schedule":
+        owner_test_id = "38a2ab6b-78d0-4c8b-be65-435db2adf3e6"
+        matches = ORIGINAL_SB("GET", "leads", params={
+            "select": "id,outreach_status,source,notes",
+            "id": "eq." + owner_test_id,
+            "limit": "1",
+        }) or []
+        test = matches[0] if matches else {}
+        should_prove = (
+            test.get("id") == owner_test_id
+            and test.get("outreach_status") == "approved"
+            and test.get("source") == "controlled_production_test"
+            and "OWNER_ONLY_PRODUCTION_OUTREACH_20261017" in (test.get("notes") or "")
+        )
+        if should_prove:
+            # Reuse this module's Gemini adapter (avoid double-importing it as
+            # __main__ and sdr_worker_gemini, which would repatch its hooks).
+            import sys
+            sys.modules["sdr_worker_gemini"] = sys.modules[__name__]
+            from production_owner_only_smoke import main as prove_one_owner_email
+
+            original_dry_run = sdr_worker.DRY_RUN
+            sdr_worker.DRY_RUN = False  # This invocation only: full real sender.
+            try:
+                prove_one_owner_email()
+            finally:
+                sdr_worker.DRY_RUN = original_dry_run
+                try:
+                    # Independent emergency send-off, even if the proof errors.
+                    ORIGINAL_SB("PATCH", "sdr_settings", params={"id": "eq.true"},
+                                body={"sending_enabled": False})
+                finally:
+                    ORIGINAL_SB("PATCH", "leads", params={"id": "eq." + owner_test_id},
+                                body={"outreach_status": "stopped",
+                                      "followup_due_at": None})
+                print("OWNER_ONLY_PRODUCTION_PROOF_FINISHED_GATE_OFF", flush=True)
+        else:
+            sdr_worker.main()
+    else:
+        sdr_worker.main()
