@@ -27,11 +27,11 @@ def preflight():
         "limit": "1000",
     }) or []
     real = [r for r in other if r["outreach_status"] == "pending"]
-    assert len(real) == 29 and len(other) == 30, "ABORT: expected 29 pending leads and one stopped test lead"
+    assert len(real) == 29 and len(other) == 30, "ABORT: expected 29 pending leads and one approved test lead"
     tests = sb("GET", "leads", params={"select": "id,source,outreach_status,notes",
              "email": "eq." + TEST_EMAIL, "limit": "2"}) or []
     assert (len(tests) == 1 and tests[0]["source"] == "controlled_production_test"
-            and tests[0]["outreach_status"] == "stopped"
+            and tests[0]["outreach_status"] == "approved"
             and MARKER in (tests[0].get("notes") or "")), "ABORT: test lead not isolated"
     assert not (sb("GET", "sdr_email_messages", params={
         "select": "id", "lead_id": "eq." + tests[0]["id"], "limit": "1"}) or []), (
@@ -39,15 +39,6 @@ def preflight():
     )
     print("SAFE_PRECHECK_PASS existing_pending_leads=29 manual_mode=true sending_enabled=false", flush=True)
     return {r["id"]: r for r in real}, tests[0]["id"]
-
-def activate_test_lead(existing_id):
-    rows = sb("PATCH", "leads", params={
-        "id": "eq." + existing_id,
-        "outreach_status": "eq.stopped",
-        "select": "id",
-    }, body={"outreach_status": "approved"}, prefer="return=representation") or []
-    assert len(rows) == 1 and rows[0].get("id") == existing_id, "TEST_LEAD_APPROVAL_FAILED"
-    return existing_id
 
 def safeguard_send(token, to_email, subject, body, **kwargs):
     global send_calls
@@ -85,8 +76,7 @@ def main():
     global lead_id, sending_armed, original_send, original_controlled_sb
     snapshot, lead_id = preflight()
     try:
-        activate_test_lead(lead_id)
-        print("TEST_LEAD_ACTIVATED lead_id=" + lead_id, flush=True)
+        print("TEST_LEAD_APPROVED_FOR_ONE_OWNER_SEND lead_id=" + lead_id, flush=True)
         original_send = worker.send_email
         original_controlled_sb = worker.sb
         worker.send_email = safeguard_send
